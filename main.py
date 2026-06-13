@@ -87,8 +87,7 @@ def sort_users(users_list):
 
 
 st.set_page_config(page_title="Organizador de Logins", layout="centered")
-st.title("Organizador de Logins .dev")
-st.markdown("Faça o upload do seu arquivo de backup `.dev` para organizar a lista de logins.")
+st.subheader("Organizador de Logins .dev")
 
 uploaded_file = st.file_uploader("Escolha um arquivo .dev", type="dev")
 
@@ -104,7 +103,6 @@ if uploaded_file is not None:
             organized_users = sort_users(original_users)
 
             st.subheader("Lista de Usuários Organizada")
-            st.markdown("Você pode clicar duas vezes em qualquer célula para editar diretamente na tabela antes de baixar.")
 
             # Converte para DataFrame
             df_users = pd.DataFrame(organized_users)
@@ -148,8 +146,6 @@ if uploaded_file is not None:
                 file_name=download_file_name,
                 mime="application/octet-stream"
             )
-
-            st.info("Seu novo arquivo `.dev` foi gerado com as modificações da tabela e está pronto para ser baixado.")
 
         else:
             st.error("O arquivo `.dev` não contém a chave 'multi_users'. Por favor, verifique se o arquivo está no formato correto.")

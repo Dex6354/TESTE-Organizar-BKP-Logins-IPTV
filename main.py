@@ -21,28 +21,50 @@ HEADERS = {
 
 def test_single_user(user):
     """Testa se o usuário está ativo ou offline via Xtream API e atualiza o emoji no nome."""
-    url = user.get('url', '')
     name = user.get('name', '')
+    url = user.get('url', '')
 
     # Remove emoji de status antigo (✅ ou ❌) se já existir no início do nome
     name = re.sub(r'^[✅❌]\s*', '', name)
 
-    # Extrai as credenciais da URL
-    user_match = re.search(r"username=([^&]+)", url)
-    pass_match = re.search(r"password=([^&]+)", url)
+    # 1. Tenta obter usuário das chaves dedicadas ou extrai da URL se não existirem
+    username = user.get('username') or user.get('user', '')
+    if not username:
+        user_match = re.search(r"username=([^&]+)", url, re.IGNORECASE)
+        username = unquote(user_match.group(1)) if user_match else ""
+    else:
+        username = unquote(str(username))
+
+    # 2. Tenta obter a senha das chaves dedicadas ou extrai da URL se não existirem
+    password = user.get('password') or user.get('pass', '')
+    if not password:
+        pass_match = re.search(r"password=([^&]+)", url, re.IGNORECASE)
+        password = unquote(pass_match.group(1)) if pass_match else ""
+    else:
+        password = unquote(str(password))
+
+    # 3. Identifica e higieniza a URL base do servidor
     base_match = re.search(r"(https?://[^/]+)", url)
+    base = base_match.group(1) if base_match else url
+    if base:
+        base = base.rstrip('/')
+        if not base.startswith(('http://', 'https://')):
+            base = 'http://' + base
 
     status = "offline"
-    if user_match and pass_match and base_match:
-        username = unquote(user_match.group(1))
-        password = unquote(pass_match.group(1))
-        base = base_match.group(1)
 
+    # Executa o teste caso possua todos os dados necessários
+    if username and password and base:
         api_url = f"{base}/player_api.php?username={quote(username)}&password={quote(password)}"
         try:
-            resp = requests.get(api_url, headers=HEADERS, verify=False, timeout=8)
-            if "user_info" in resp.json():
-                status = "active"
+            resp = requests.get(api_url, headers=HEADERS, verify=False, timeout=12)
+            data_json = resp.json()
+            
+            # Valida se retornou a estrutura correta de login ativo
+            if isinstance(data_json, dict) and "user_info" in data_json:
+                user_status = data_json.get("user_info", {}).get("status")
+                if user_status != "Expired":
+                    status = "active"
         except:
             pass
 
@@ -53,7 +75,6 @@ def test_single_user(user):
 def sort_users(users_list):
     """Organiza a lista de usuários com base nas regras de ordenação."""
     def get_emoji_sort_key(name):
-        # Incluído o ✅ na prioridade de ordenação de emojis
         priority_order = ['❌', '✅', '📺', '🔞', '🟢', '💧', '🔥']
         sort_key = []
         for emoji in name:
@@ -79,7 +100,7 @@ def sort_users(users_list):
         if '👎' not in name1 and '👎' in name2:
             return 1
 
-        # Regra 3: Nomes com palavras
+        # Regra 2: Nomes com palavras
         is_word_name1 = bool(re.search(r'[a-zA-ZáàâãéèêíïóôõöúüçÇÁÀÂÃÉÈÊÍÏÓÕÖÚÜ]', name1))
         is_word_name2 = bool(re.search(r'[a-zA-ZáàâãéèêíïóôõöúüçÇÁÀÂÃÉÈÊÍÏÓÕÖÚÜ]', name2))
         
@@ -134,7 +155,7 @@ if uploaded_file is not None:
         if "multi_users" in data:
             original_users = data["multi_users"]
 
-            # Processamento em paralelo para testar o status de todos os usuários de forma rápida
+            # Processamento em paralelo para testar o status de todos os usuários
             with st.spinner("⚡ Testando status dos servidores de IPTV..."):
                 tested_users = []
                 with ThreadPoolExecutor(max_workers=10) as executor:

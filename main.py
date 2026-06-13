@@ -11,11 +11,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # Desabilitar avisos de segurança SSL
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# Cabeçalhos para simular o navegador nas requisições de teste
+# Cabeçalhos completos para simular perfeitamente o navegador nas requisições de teste
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "*/*",
-    "Connection": "keep-alive"
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1"
 }
 
 def test_single_user(user):
@@ -56,14 +58,29 @@ def test_single_user(user):
     if username and password and base:
         api_url = f"{base}/player_api.php?username={quote(username)}&password={quote(password)}"
         try:
-            resp = requests.get(api_url, headers=HEADERS, verify=False, timeout=12)
-            data_json = resp.json()
-            
-            # Valida se retornou a estrutura correta de login ativo
-            if isinstance(data_json, dict) and "user_info" in data_json:
-                user_status = data_json.get("user_info", {}).get("status")
-                if user_status != "Expired":
-                    status = "active"
+            resp = requests.get(api_url, headers=HEADERS, verify=False, timeout=15)
+            if resp.status_code == 200:
+                resp.encoding = resp.apparent_encoding
+                content = resp.text
+                
+                # Validação resiliente para evitar falsos negativos por quebra de encoding ou formato do painel
+                if "user_info" in content:
+                    try:
+                        data_json = resp.json()
+                        if isinstance(data_json, dict):
+                            user_status = data_json.get("user_info", {}).get("status")
+                            if str(user_status).strip().lower() == "expired":
+                                status = "offline"
+                            else:
+                                status = "active"
+                        else:
+                            status = "active"
+                    except:
+                        # Fallback: Se houver erro de parsing do JSON, valida direto por string no texto estruturado
+                        if '"status":"Expired"' in content.replace(" ", "") or '"status":"expired"' in content.replace(" ", ""):
+                            status = "offline"
+                        else:
+                            status = "active"
         except:
             pass
 

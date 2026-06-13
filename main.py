@@ -109,20 +109,22 @@ if uploaded_file is not None:
             # Converte para DataFrame
             df_users = pd.DataFrame(organized_users)
             
-            # Reorganiza as colunas: 'url' como a primeira e 'userid' como a última
+            # Reorganiza as colunas: 'name' passa a ser a primeira coluna
             cols = list(df_users.columns)
-            if 'url' in cols:
-                cols.remove('url')
-                cols.insert(0, 'url')
-            if 'userid' in cols:
-                cols.remove('userid')
-                cols.append('userid')
+            if 'name' in cols:
+                cols.remove('name')
+                cols.insert(0, 'name')
             df_users = df_users[cols]
 
-            # Exibe a tabela editável com o novo mapeamento de colunas
-            edited_df = st.data_editor(df_users, num_rows="dynamic", use_container_width=True)
+            # Exibe a tabela editável e oculta a coluna 'userid' da interface
+            edited_df = st.data_editor(
+                df_users, 
+                num_rows="dynamic", 
+                use_container_width=True,
+                column_config={"userid": None}  # Esconde a coluna sem removê-la dos dados
+            )
 
-            # Reconverte a tabela editada de volta para a estrutura JSON
+            # Reconverte a tabela editada de volta para a estrutura JSON (mantendo o userid oculto)
             edited_users = edited_df.to_dict(orient="records")
             new_data = {"multi_users": edited_users}
 

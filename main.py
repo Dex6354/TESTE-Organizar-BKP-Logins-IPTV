@@ -6,38 +6,32 @@ import pandas as pd
 import requests
 import urllib3
 import ssl
+import urllib.request
 from urllib.parse import quote, unquote
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Desabilitar avisos de segurança SSL
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# Cabeçalhos completos para simular perfeitamente o navegador nas requisições de teste
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-    "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
-    "Connection": "keep-alive",
-    "Upgrade-Insecure-Requests": "1"
-}
-
 class LegacySslAdapter(requests.adapters.HTTPAdapter):
-    """Adaptador SSL para permitir conexões com servidores IPTV que usam criptografia antiga/legada."""
+    """Adaptador SSL para compatibilidade máxima com cifras antigas e servidores legados."""
     def init_poolmanager(self, *args, **kwargs):
         ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
         try:
-            ctx.set_ciphers('DEFAULT@SECLEVEL=1')  # Permite chaves menores e ciphers antigos
+            ctx.set_ciphers('ALL:@SECLEVEL=0')  # Permite qualquer cifra e reduz nível de segurança ao mínimo
         except:
             pass
         try:
-            ctx.options |= 0x4  # OP_LEGACY_SERVER_CONNECT (ignora restrições rígidas de handshake)
+            ctx.options |= 0x4  # OP_LEGACY_SERVER_CONNECT
         except:
             pass
         kwargs['ssl_context'] = ctx
         return super(LegacySslAdapter, self).init_poolmanager(*args, **kwargs)
 
 def test_single_user(user):
-    """Testa se o usuário está ativo ou offline via Xtream API e atualiza o emoji no nome."""
+    """Testa se o usuário está ativo ou offline via Xtream API com múltiplos fallbacks de agentes e bibliotecas."""
     name = user.get('name', '')
     url = user.get('url', '')
 
@@ -74,43 +68,72 @@ def test_single_user(user):
     if username and password and base:
         api_url = f"{base}/player_api.php?username={quote(username)}&password={quote(password)}"
         
-        # Estratégia de tentativa: se HTTPS falhar por SSL, tenta via HTTP puro
+        # Lista de variações de protocolos para testar alternadamente
         urls_to_test = [api_url]
         if api_url.startswith("https://"):
             urls_to_test.append(api_url.replace("https://", "http://", 1))
+        elif api_url.startswith("http://"):
+            urls_to_test.append(api_url.replace("http://", "https://", 1))
+
+        # Lista de User-Agents: Navegador Padrão vs Players de Mídia (frequentemente em Whitelist de WAFs)
+        user_agents = [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "VLC/3.0.18 LibVLC/3.0.18",
+            "IPTVSmartersPlayer"
+        ]
+
+        found_active = False
 
         for target_url in urls_to_test:
-            try:
-                with requests.Session() as session:
-                    session.mount("https://", LegacySslAdapter())
-                    resp = session.get(target_url, headers=HEADERS, verify=False, timeout=12)
-                    
-                    resp.encoding = resp.apparent_encoding
-                    content = resp.text
-                    
-                    # Se encontrou a estrutura padrão do Xtream, valida o conteúdo
-                    if "user_info" in content:
-                        try:
-                            data_json = resp.json()
-                            if isinstance(data_json, dict):
-                                user_status = data_json.get("user_info", {}).get("status")
-                                if str(user_status).strip().lower() == "expired":
-                                    status = "offline"
-                                else:
-                                    status = "active"
-                            else:
-                                status = "active"
-                        except:
-                            # Fallback em texto puro caso o JSON venha malformado pelo painel
+            if found_active:
+                break
+
+            for ua in user_agents:
+                headers = {
+                    "User-Agent": ua,
+                    "Accept": "*/*",
+                    "Connection": "keep-alive"
+                }
+
+                # MÉTODO 1: Requests com tratamento permissivo de resposta e SSL
+                try:
+                    with requests.Session() as session:
+                        session.mount("https://", LegacySslAdapter())
+                        # Remove a trava estrita do status_code == 200 (alguns firewalls respondem em blocos alternativos)
+                        resp = session.get(target_url, headers=headers, verify=False, timeout=10)
+                        resp.encoding = resp.apparent_encoding
+                        content = resp.text
+
+                        if "user_info" in content:
                             if '"status":"Expired"' in content.replace(" ", "") or '"status":"expired"' in content.replace(" ", ""):
                                 status = "offline"
                             else:
                                 status = "active"
-                        
-                        # Se achou uma resposta válida, não precisa tentar o próximo fallback (HTTP)
-                        break
-            except:
-                continue
+                            found_active = True
+                            break
+                except:
+                    pass
+
+                # MÉTODO 2: Fallback para urllib nativo (ignora problemas de pool de conexões/erros de chunking do requests)
+                if not found_active:
+                    try:
+                        ssl_ctx = ssl._create_unverified_context()
+                        try:
+                            ssl_ctx.set_ciphers('ALL:@SECLEVEL=0')
+                        except:
+                            pass
+                        req = urllib.request.Request(target_url, headers=headers)
+                        with urllib.request.urlopen(req, context=ssl_ctx, timeout=10) as response:
+                            content = response.read().decode('utf-8', errors='ignore')
+                            if "user_info" in content:
+                                if '"status":"Expired"' in content.replace(" ", "") or '"status":"expired"' in content.replace(" ", ""):
+                                    status = "offline"
+                                else:
+                                    status = "active"
+                                found_active = True
+                                break
+                    except:
+                        pass
 
     # Define o novo emoji com base no status atualizado
     user['name'] = f"✅ {name}" if status == "active" else f"❌ {name}"
@@ -124,40 +147,27 @@ def test_single_user(user):
     return user
 
 def sort_users(users_list):
-    """
-    Organiza a lista de usuários com base na hierarquia estipulada:
-    1. ✅ depois ❌
-    2. 🔥 depois 💧
-    3. 🟢 depois 🔞
-    4. 📺 depois 📱
-    5. Ordem alfabética
-    """
+    """Organiza a lista de usuários com base na hierarquia estipulada."""
     def get_sort_key(user):
         name = user.get('name', '')
         
-        # 1- ✅ depois ❌
         if '✅' in name: r1 = 0
         elif '❌' in name: r1 = 1
         else: r1 = 2
             
-        # 2- 🔥 depois 💧
         if '🔥' in name: r2 = 0
         elif '💧' in name: r2 = 1
         else: r2 = 2
             
-        # 3- 🟢 depois 🔞
         if '🟢' in name: r3 = 0
         elif '🔞' in name: r3 = 1
         else: r3 = 2
             
-        # 4- 📺 depois 📱
         if '📺' in name: r4 = 0
         elif '📱' in name: r4 = 1
         else: r4 = 2
             
-        # 5- Ordem alfabética (case-insensitive)
         r5 = name.lower()
-        
         return (r1, r2, r3, r4, r5)
 
     return sorted(users_list, key=get_sort_key)
@@ -176,7 +186,6 @@ if uploaded_file is not None:
         if "multi_users" in data:
             original_users = data["multi_users"]
 
-            # Processamento em paralelo para testar o status de todos os usuários
             with st.spinner("⚡ Testando status dos servidores de IPTV..."):
                 tested_users = []
                 with ThreadPoolExecutor(max_workers=10) as executor:
@@ -189,10 +198,8 @@ if uploaded_file is not None:
 
             st.subheader("Lista de Usuários Organizada")
 
-            # Converte para DataFrame
             df_users = pd.DataFrame(organized_users)
             
-            # Reorganiza as colunas manualmente colocando 'json_link' estritamente por último
             cols = list(df_users.columns)
             for c in ['name', 'url', 'json_link']:
                 if c in cols:
@@ -204,14 +211,13 @@ if uploaded_file is not None:
             if 'url' in df_users.columns:
                 ordered_cols.append('url')
                 
-            ordered_cols.extend(cols) # adiciona colunas dinâmicas remanescentes
+            ordered_cols.extend(cols)
             
             if 'json_link' in df_users.columns:
                 ordered_cols.append('json_link')
                 
             df_users = df_users[ordered_cols]
 
-            # Exibe a tabela editável, define o link como clicável e bloqueia edição na coluna do Link
             edited_df = st.data_editor(
                 df_users, 
                 num_rows="dynamic", 
@@ -224,7 +230,6 @@ if uploaded_file is not None:
                 disabled=["json_link"]
             )
 
-            # Reconverte a tabela de volta e limpa a chave temporária de exibição do JSON link
             edited_users = edited_df.to_dict(orient="records")
             for user in edited_users:
                 user.pop('json_link', None)

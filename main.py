@@ -1,268 +1,206 @@
 import streamlit as st
 import json
 import re
+import os
+import pandas as pd
 import requests
-from urllib.parse import quote, urlparse, unquote
-from datetime import datetime
-import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import unicodedata
 import urllib3
+from urllib.parse import quote, unquote
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# Desabilitar avisos de segurança para certificados SSL inválidos (comum em IPTV)
+# Desabilitar avisos de segurança SSL
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# Configuração da página do Streamlit
-st.set_page_config(page_title="Testar Xtream API", layout="centered")
-
-# Cabeçalhos para simular um navegador e fallback de player oficial
-HEADERS_BROWSER = {
+# Cabeçalhos para simular o navegador nas requisições de teste
+HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Accept": "*/*",
     "Connection": "keep-alive"
 }
-HEADERS_PLAYER = {
-    "User-Agent": "IPTV-Smarters",
-    "Accept": "*/*",
-    "Connection": "keep-alive"
-}
 
-# Estilos CSS (Inclui quebra de linha automática para links longos)
-st.markdown("""
-    <style>
-        .block-container { padding-top: 2.5rem; }
-        .stCodeBlock, code { white-space: pre-wrap !important; word-break: break-all !important; }
-        a { word-break: break-all !important; }
-    </style>
-""", unsafe_allow_html=True)
+def test_single_user(user):
+    """Testa se o usuário está ativo ou offline via Xtream API e atualiza o emoji no nome."""
+    name = user.get('name', '')
+    url = user.get('url', '')
 
-st.markdown("""
-    <h5 style='margin-bottom: 0.1rem;'>🔌 Testar Xtream API</h5>
-    <p style='margin-top: 0.1rem;'>
-        ✅ <strong>Domínios aceitos no Smarters Pro:</strong> <code>.ca</code>, <code>.io</code>, <code>.cc</code>, <code>.me</code>, <code>.top</code>, <code>.space</code>, <code>.in</code>.<br>
-        ❌ <strong>Domínios não aceitos:</strong> <code>.site</code>, <code>.com</code>, <code>.lat</code>, <code>.live</code>, <code>.icu</code>, <code>.xyz</code>, <code>.online</code>.
-    </p>
-""", unsafe_allow_html=True)
+    # Remove emoji de status antigo (✅ ou ❌) se já existir no início do nome
+    name = re.sub(r'^[✅❌]\s*', '', name)
 
-if "m3u_input_value" not in st.session_state:
-    st.session_state.m3u_input_value = ""
-if "search_name" not in st.session_state:
-    st.session_state.search_name = ""
-
-def clear_input():
-    st.session_state.m3u_input_value = ""
-    st.session_state.search_name = ""
-
-def normalize_text(text):
-    if not isinstance(text, str): return ""
-    text = text.lower()
-    return unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('utf-8')
-
-def parse_urls(message):
-    m3u_pattern = r"(https?://[^\s\"']+(?:get\.php|player_api\.php)\?username=([^\s&\"']+)&password=([^\s&\"']+))"
-    found = re.findall(m3u_pattern, message)
-    parsed_urls = []
-    unique_ids = set()
-
-    for item in found:
-        full_url, user, pwd = item
-        user = unquote(user)
-        pwd = unquote(pwd)
-        
-        base_match = re.search(r"(https?://[^/]+(?::\d+)?)", full_url)
-        if base_match:
-            base_full = base_match.group(1)
-            if base_full.endswith('/'): base_full = base_full[:-1]
-            
-            parsed_url = urlparse(base_full)
-            base_display = f"{parsed_url.scheme}://{parsed_url.hostname}"
-            
-            identifier = (base_full, user, pwd)
-            if identifier not in unique_ids:
-                unique_ids.add(identifier)
-                parsed_urls.append({
-                    "base": base_full, 
-                    "display_base": base_display, 
-                    "username": user, 
-                    "password": pwd
-                })
-    return parsed_urls
-
-def get_series_details(base_url, username, password, series_id, headers):
-    try:
-        url = f"{base_url}/player_api.php?username={quote(username)}&password={quote(password)}&action=get_series_info&series_id={series_id}"
-        resp = requests.get(url, headers=headers, verify=False, timeout=10).json()
-        episodes = resp.get("episodes", {})
-        if not episodes: return None
-        last_season_num = max(int(k) for k in episodes.keys() if k.isdigit())
-        last_episode = episodes[str(last_season_num)][-1]
-        title = last_episode.get("title", "")
-        match = re.search(r"S(\d+)E(\d+)", title, re.IGNORECASE)
-        return match.group(0).upper() if match else f"S{last_season_num:02d}E{len(episodes[str(last_season_num)]):02d}"
-    except: return None
-
-def get_xtream_info(url_data, search_name=None):
-    base, user, pwd = url_data["base"], url_data["username"], url_data["password"]
-    display_base = url_data["display_base"]
-    u_enc, p_enc = quote(user), quote(pwd)
-    api_url = f"{base}/player_api.php?username={u_enc}&password={p_enc}"
-    
-    res = {
-        "is_json": False, "real_server": base, "exp_date": "Falha no login",
-        "active_cons": "N/A", "max_connections": "N/A", "has_adult_content": False,
-        "is_accepted_domain": False, "live_count": 0, "vod_count": 0, "series_count": 0,
-        "search_matches": {"Canais": [], "Filmes": [], "Séries": {}}
-    }
-
-    adult_keys = ["adult", "xxx", "+18", "sex", "porn", "adulto"]
-    current_headers = HEADERS_BROWSER
-
-    try:
-        # 1ª Tentativa: Com cabeçalho de navegador comum
-        main_resp = requests.get(api_url, headers=current_headers, verify=False, timeout=12)
-        
-        # Fallback: Se o servidor recusar ou não retornar as chaves de login, tenta como player oficial
-        if main_resp.status_code != 200 or "user_info" not in main_resp.text:
-            current_headers = HEADERS_PLAYER
-            main_resp = requests.get(api_url, headers=current_headers, verify=False, timeout=12)
-
-        # Remove potenciais espaços ou caracteres invisíveis (BOM) do início da resposta text
-        content_text = main_resp.text.strip()
-        if content_text.startswith('\ufeff'):
-            content_text = content_text[1:]
-
-        data_json = json.loads(content_text)
-        
-        if "user_info" not in data_json: 
-            return url_data, res
-        
-        res["is_json"] = True
-        user_info = data_json.get("user_info", {})
-        exp = user_info.get("exp_date")
-        if exp and str(exp).isdigit():
-            if int(exp) == 0:
-                res["exp_date"] = "Ilimitado"
-            else:
-                res["exp_date"] = "Nunca expira" if int(exp) > time.time() * 200 else datetime.fromtimestamp(int(exp)).strftime('%d/%m/%Y')
-        else:
-            res["exp_date"] = "Indefinido"
-        
-        res["active_cons"] = user_info.get("active_cons", "0")
-        res["max_connections"] = user_info.get("max_connections", "0")
-        
-        valid_tlds = ('.ca', '.io', '.cc', '.me', '.in', '.top', '.space')
-        clean_domain = display_base.lower()
-        res["is_accepted_domain"] = any(clean_domain.endswith(tld) for tld in valid_tlds)
-
-        try:
-            cat_resp = requests.get(f"{api_url}&action=get_live_categories", headers=current_headers, verify=False, timeout=10).json()
-            if isinstance(cat_resp, list):
-                for cat in cat_resp:
-                    cat_name = normalize_text(cat.get("category_name", ""))
-                    if any(key in cat_name for key in adult_keys):
-                        res["has_adult_content"] = True
-                        break
-        except: pass
-
-        actions = {"live": "get_live_streams", "vod": "get_vod_streams", "series": "get_series"}
-        with ThreadPoolExecutor(max_workers=3) as executor:
-            future_to_key = {
-                executor.submit(requests.get, f"{api_url}&action={act}", headers=current_headers, verify=False, timeout=18): key 
-                for key, act in actions.items()
-            }
-            for future in as_completed(future_to_key):
-                key = future_to_key[future]
-                try:
-                    resp_content = future.result().json()
-                    if isinstance(resp_content, list):
-                        res[f"{key}_count"] = len(resp_content)
-                        if not res["has_adult_content"] and key == "live":
-                            for item in resp_content[:100]:
-                                if any(key in normalize_text(item.get("name", "")) for key in adult_keys):
-                                    res["has_adult_content"] = True
-                                    break
-                        if search_name:
-                            s_norm = normalize_text(search_name)
-                            if key == "series":
-                                for item in resp_content:
-                                    if s_norm in normalize_text(item.get("name")):
-                                        s_id = item.get("series_id")
-                                        s_info = get_series_details(base, user, pwd, s_id, current_headers)
-                                        res["search_matches"]["Séries"][item.get("name")] = s_info or "Disponível"
-                            else:
-                                matches = [i.get("name") for i in resp_content if s_norm in normalize_text(i.get("name"))]
-                                cat_name = "Canais" if key == "live" else "Filmes"
-                                res["search_matches"][cat_name].extend(matches)
-                except: continue
-    except: pass
-    return url_data, res
-
-# Interface
-with st.form(key="m3u_form"):
-    m3u_message = st.text_area("Cole o texto contendo as URLs aqui", key="m3u_input_value", height=150)
-    search_query = st.text_input("🔍 Buscar conteúdo específico (opcional)", key="search_name")
-    
-    c1, c2 = st.columns([1,1])
-    with c1: submit = st.form_submit_button("🚀 Testar Agora")
-    with c2: clear = st.form_submit_button("🧹 Limpar", on_click=clear_input)
-
-if submit and m3u_message:
-    parsed = parse_urls(m3u_message)
-    if not parsed:
-        st.error("Nenhuma URL ou credencial válida encontrada no texto.")
+    # 1. Tenta obter usuário das chaves dedicadas ou extrai da URL se não existirem
+    username = user.get('username') or user.get('user', '')
+    if not username:
+        user_match = re.search(r"username=([^&]+)", url, re.IGNORECASE)
+        username = unquote(user_match.group(1)) if user_match else ""
     else:
-        all_results = []
-        with st.spinner(f"Analisando {len(parsed)} servidor(es)..."):
-            with ThreadPoolExecutor(max_workers=5) as executor:
-                futures = [executor.submit(get_xtream_info, url, search_query) for url in parsed]
-                for future in as_completed(futures):
-                    all_results.append(future.result())
-        
-        all_results.sort(key=lambda x: x[1]["is_json"], reverse=True)
-        
-        st.write("### 📋 Resultados dos Usuários")
-        
-        for orig, info in all_results:
-            status_icon = "✅" if info["is_json"] else "❌"
-            exp_date = info['exp_date']
-            
-            row_title = f"{status_icon} {orig['display_base']} | {orig['username']}"
-            
-            with st.expander(row_title):
-                col_a, col_b = st.columns(2)
-                with col_a:
-                    st.write(f"🌐 **Servidor Real:** `{orig['base']}`")
-                    st.write(f"👤 **Usuário:** `{orig['username']}`")
-                    st.write(f"🔑 **Senha:** `{orig['password']}`")
-                    
-                    color_date = "red" if "Falha" in exp_date else "green"
-                    st.markdown(f"📅 **Expira:** <span style='color:{color_date}'>**{exp_date}**</span>", unsafe_allow_html=True)
-                    
-                    adult_status = "🔞 Sim" if info["has_adult_content"] else "🛡️ Não"
-                    st.write(f"🔞 **Adulto:** `{adult_status}`")
-                    
-                with col_b:
-                    st.write(f"📺 **Canais:** `{info['live_count']}`")
-                    st.write(f"🎬 **Filmes:** `{info['vod_count']}`")
-                    st.write(f"🍿 **Séries:** `{info['series_count']}`")
-                    st.write(f"👥 **Conexões:** `{info['active_cons']}/{info['max_connections']}`")
-                    
-                    domain_status = "✅" if info['is_accepted_domain'] else "❌"
-                    st.write(f"📺 **Domínio TV:** {domain_status}")
-                
-                m3u_generated = f"{orig['base']}/get.php?username={quote(orig['username'])}&password={quote(orig['password'])}&type=m3u_plus"
-                json_generated = f"{orig['base']}/player_api.php?username={quote(orig['username'])}&password={quote(orig['password'])}"
-                
-                st.markdown(f"📥 **M3U:** [{m3u_generated}]({m3u_generated})")
-                st.markdown(f"🌐 **JSON:** [{json_generated}]({json_generated})")
+        username = unquote(str(username))
 
-                if search_query and any(info["search_matches"].values()):
-                    st.info(f"🔎 Resultados para '{search_query}':")
-                    for cat, matches in info["search_matches"].items():
-                        if matches:
-                            st.write(f"**{cat}:**")
-                            if isinstance(matches, dict):
-                                for n, v in matches.items(): st.write(f"- {n} ({v})")
-                            else:
-                                for m in matches[:10]: st.write(f"- {m}")
-                                if len(matches) > 10: st.write(f"... e mais {len(matches)-10}")
+    # 2. Tenta obter a senha das chaves dedicadas ou extrai da URL se não existirem
+    password = user.get('password') or user.get('pass', '')
+    if not password:
+        pass_match = re.search(r"password=([^&]+)", url, re.IGNORECASE)
+        password = unquote(pass_match.group(1)) if pass_match else ""
+    else:
+        password = unquote(str(password))
+
+    # 3. Identifica e higieniza a URL base do servidor
+    base_match = re.search(r"(https?://[^/]+)", url)
+    base = base_match.group(1) if base_match else url
+    if base:
+        base = base.rstrip('/')
+        if not base.startswith(('http://', 'https://')):
+            base = 'http://' + base
+
+    status = "offline"
+
+    # Executa o teste caso possua todos os dados necessários
+    if username and password and base:
+        api_url = f"{base}/player_api.php?username={quote(username)}&password={quote(password)}"
+        try:
+            resp = requests.get(api_url, headers=HEADERS, verify=False, timeout=12)
+            data_json = resp.json()
+            
+            # Valida se retornou a estrutura correta de login ativo
+            if isinstance(data_json, dict) and "user_info" in data_json:
+                user_status = data_json.get("user_info", {}).get("status")
+                if user_status != "Expired":
+                    status = "active"
+        except:
+            pass
+
+    # Define o novo emoji com base no status atualizado
+    user['name'] = f"✅ {name}" if status == "active" else f"❌ {name}"
+    
+    # Monta a URL JSON final para a tabela clicável
+    if username and password and base:
+        user['json_link'] = f"{base}/player_api.php?username={quote(username)}&password={quote(password)}"
+    else:
+        user['json_link'] = ""
+        
+    return user
+
+def sort_users(users_list):
+    """
+    Organiza a lista de usuários com base na hierarquia estipulada:
+    1. ✅ depois ❌
+    2. 🔥 depois 💧
+    3. 🟢 depois 🔞
+    4. 📺 depois 📱
+    5. Ordem alfabética
+    """
+    def get_sort_key(user):
+        name = user.get('name', '')
+        
+        # 1- ✅ depois ❌
+        if '✅' in name: r1 = 0
+        elif '❌' in name: r1 = 1
+        else: r1 = 2
+            
+        # 2- 🔥 depois 💧
+        if '🔥' in name: r2 = 0
+        elif '💧' in name: r2 = 1
+        else: r2 = 2
+            
+        # 3- 🟢 depois 🔞
+        if '🟢' in name: r3 = 0
+        elif '🔞' in name: r3 = 1
+        else: r3 = 2
+            
+        # 4- 📺 depois 📱
+        if '📺' in name: r4 = 0
+        elif '📱' in name: r4 = 1
+        else: r4 = 2
+            
+        # 5- Ordem alfabética (case-insensitive)
+        r5 = name.lower()
+        
+        return (r1, r2, r3, r4, r5)
+
+    return sorted(users_list, key=get_sort_key)
+
+
+st.set_page_config(page_title="Organizador de Logins", layout="centered")
+st.subheader("Organizador de Logins .dev")
+
+uploaded_file = st.file_uploader("Escolha um arquivo .dev", type="dev")
+
+if uploaded_file is not None:
+    try:
+        file_content = uploaded_file.getvalue().decode("utf-8")
+        data = json.loads(file_content)
+
+        if "multi_users" in data:
+            original_users = data["multi_users"]
+
+            # Processamento em paralelo para testar o status de todos os usuários
+            with st.spinner("⚡ Testando status dos servidores de IPTV..."):
+                tested_users = []
+                with ThreadPoolExecutor(max_workers=10) as executor:
+                    futures = [executor.submit(test_single_user, user) for user in original_users]
+                    for future in as_completed(futures):
+                        tested_users.append(future.result())
+
+            st.success("Análise de status concluída com sucesso!")
+            organized_users = sort_users(tested_users)
+
+            st.subheader("Lista de Usuários Organizada")
+
+            # Converte para DataFrame
+            df_users = pd.DataFrame(organized_users)
+            
+            # Reorganiza as colunas manualmente colocando 'json_link' estritamente por último
+            cols = list(df_users.columns)
+            for c in ['name', 'url', 'json_link']:
+                if c in cols:
+                    cols.remove(c)
+            
+            ordered_cols = []
+            if 'name' in df_users.columns:
+                ordered_cols.append('name')
+            if 'url' in df_users.columns:
+                ordered_cols.append('url')
+                
+            ordered_cols.extend(cols) # adiciona colunas dinâmicas remanescentes
+            
+            if 'json_link' in df_users.columns:
+                ordered_cols.append('json_link')
+                
+            df_users = df_users[ordered_cols]
+
+            # Exibe a tabela editável, define o link como clicável e bloqueia edição na coluna do Link
+            edited_df = st.data_editor(
+                df_users, 
+                num_rows="dynamic", 
+                use_container_width=True,
+                column_config={
+                    "userid": None,
+                    "type": None,
+                    "json_link": st.column_config.LinkColumn("Link JSON", help="URL gerada para a API do Player")
+                },
+                disabled=["json_link"]
+            )
+
+            # Reconverte a tabela de volta e limpa a chave temporária de exibição do JSON link
+            edited_users = edited_df.to_dict(orient="records")
+            for user in edited_users:
+                user.pop('json_link', None)
+
+            new_data = {"multi_users": edited_users}
+            organized_content = json.dumps(new_data, indent=2, ensure_ascii=False)
+
+            original_file_name, file_extension = os.path.splitext(uploaded_file.name)
+            download_file_name = f"{original_file_name}_organized{file_extension}"
+
+            st.download_button(
+                label="Clique para Baixar o Arquivo Organizado",
+                data=organized_content,
+                file_name=download_file_name,
+                mime="application/octet-stream"
+            )
+
+        else:
+            st.error("O arquivo `.dev` não contém a chave 'multi_users'.")
+
+    except json.JSONDecodeError:
+        st.error("Erro ao decodificar o arquivo JSON. Certifique-se de que é um arquivo JSON válido.")
+    except Exception as e:
+        st.error(f"Ocorreu um erro inesperado: {e}")

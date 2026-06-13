@@ -1,11 +1,16 @@
+import streamlit as st
 import requests
 import urllib3
 import ssl
 import urllib.request
 from urllib.parse import unquote
 
-# Desabilitar avisos de SSL
+# Desabilitar avisos de segurança SSL
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+st.set_page_config(page_title="Debugger de Domínios IPTV", layout="wide")
+st.title("🔍 Debugger de Conexão IPTV")
+st.write("Testando os domínios problemáticos diretamente na página:")
 
 # URLs exatas informadas com problema
 URLS_TESTE = [
@@ -32,57 +37,52 @@ class LegacySslAdapter(requests.adapters.HTTPAdapter):
         kwargs['ssl_context'] = ctx
         return super(LegacySslAdapter, self).init_poolmanager(*args, **kwargs)
 
-print("=" * 60)
-print("             INICIANDO DEBUGGER IPTV DOMÍNIOS          ")
-print("=" * 60)
+# Botão para iniciar o teste manual na página
+if st.button("⚡ Executar Testes de Conexão"):
+    for url in URLS_TESTE:
+        st.subheader(f"🌐 Alvo: `{url}`")
+        
+        # -------------------------------------------------------------
+        # MÉTODO 1: Requests Moderno
+        # -------------------------------------------------------------
+        with st.expander("Camada 1: Requests Moderno (Padrão Navegador)", expanded=True):
+            try:
+                r = requests.get(url, headers=HEADERS, verify=False, timeout=10, allow_redirects=True)
+                st.metric("Status Code", r.status_code)
+                st.text(f"URL Final: {r.url}")
+                st.write(f"Contém 'user_info'?: **{ 'user_info' in r.text }**")
+                st.code(r.text[:300], language="json")
+            except Exception as e:
+                st.error(f"Falha: {type(e).__name__} -> {e}")
 
-for url in URLS_TESTE:
-    print(f"\n\n[ALVO]: {url}")
-    print("-" * 60)
+        # -------------------------------------------------------------
+        # MÉTODO 2: Requests Criptografia Legada (SECLEVEL=0)
+        # -------------------------------------------------------------
+        with st.expander("Camada 2: Requests Legado (SECLEVEL=0)", expanded=False):
+            try:
+                with requests.Session() as session:
+                    session.mount("https://", LegacySslAdapter())
+                    r = session.get(url, headers=HEADERS, verify=False, timeout=10, allow_redirects=True)
+                    st.metric("Status Code", r.status_code)
+                    st.text(f"URL Final: {r.url}")
+                    st.write(f"Contém 'user_info'?: **{ 'user_info' in r.text }**")
+                    st.code(r.text[:300], language="json")
+            except Exception as e:
+                st.error(f"Falha: {type(e).__name__} -> {e}")
 
-    # -------------------------------------------------------------
-    # MÉTODO 1: Requests Moderno / Padrão
-    # -------------------------------------------------------------
-    print("\n-> [MÉTODO 1] Requests Moderno (Navegador Padrão):")
-    try:
-        r = requests.get(url, headers=HEADERS, verify=False, timeout=10, allow_redirects=True)
-        print(f"   Status Code: {r.status_code}")
-        print(f"   URL Final Redirecionada: {r.url}")
-        print(f"   Contém 'user_info'?: {'user_info' in r.text}")
-        print(f"   Resposta Bruta (150 chars): {r.text[:150].strip()}")
-    except Exception as e:
-        print(f"   ❌ FALHA: {type(e).__name__} -> {e}")
-
-    # -------------------------------------------------------------
-    # MÉTODO 2: Requests Criptografia Legada (SECLEVEL=0)
-    # -------------------------------------------------------------
-    print("\n-> [MÉTODO 2] Requests Legado (SECLEVEL=0):")
-    try:
-        with requests.Session() as session:
-            session.mount("https://", LegacySslAdapter())
-            r = session.get(url, headers=HEADERS, verify=False, timeout=10, allow_redirects=True)
-            print(f"   Status Code: {r.status_code}")
-            print(f"   URL Final Redirecionada: {r.url}")
-            print(f"   Contém 'user_info'?: {'user_info' in r.text}")
-            print(f"   Resposta Bruta (150 chars): {r.text[:150].strip()}")
-    except Exception as e:
-        print(f"   ❌ FALHA: {type(e).__name__} -> {e}")
-
-    # -------------------------------------------------------------
-    # MÉTODO 3: Urllib Nativo do Python
-    # -------------------------------------------------------------
-    print("\n-> [MÉTODO 3] Urllib Nativo (Ignora travas de Ciphers):")
-    try:
-        ssl_ctx = ssl._create_unverified_context()
-        req = urllib.request.Request(url, headers=HEADERS)
-        with urllib.request.urlopen(req, context=ssl_ctx, timeout=10) as response:
-            content = response.read().decode('utf-8', errors='ignore')
-            print(f"   URL Final Redirecionada: {response.geturl()}")
-            print(f"   Contém 'user_info'?: {'user_info' in content}")
-            print(f"   Resposta Bruta (150 chars): {content[:150].strip()}")
-    except Exception as e:
-        print(f"   ❌ FALHA: {type(e).__name__} -> {e}")
-
-print("\n" + "=" * 60)
-print("             FIM DOS TESTES DO DEBUGGER               ")
-print("=" * 60)
+        # -------------------------------------------------------------
+        # MÉTODO 3: Urllib Nativo do Python
+        # -------------------------------------------------------------
+        with st.expander("Camada 3: Urllib Nativo (Ignora travas)", expanded=False):
+            try:
+                ssl_ctx = ssl._create_unverified_context()
+                req = urllib.request.Request(url, headers=HEADERS)
+                with urllib.request.urlopen(req, context=ssl_ctx, timeout=10) as response:
+                    content = response.read().decode('utf-8', errors='ignore')
+                    st.text(f"URL Final: {response.geturl()}")
+                    st.write(f"Contém 'user_info'?: **{ 'user_info' in content }**")
+                    st.code(content[:300], language="json")
+            except Exception as e:
+                st.error(f"Falha: {type(e).__name__} -> {e}")
+                
+        st.markdown("---")

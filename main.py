@@ -2,11 +2,12 @@ import streamlit as st
 import json
 import re
 import os
+import pandas as pd
 from functools import cmp_to_key
 
 def sort_users(users_list):
     """
-    Organiza a lista de usuários com base nas regras de ordenação:
+    Organiza a lista de usuários com base das regras de ordenação:
     1. Nome com 👎.
     2. Nomes com letras/palavras, priorizando a palavra final (Z-A).
     3. Emojis na ordem inversa.
@@ -102,16 +103,23 @@ if uploaded_file is not None:
             original_users = data["multi_users"]
             organized_users = sort_users(original_users)
 
-            new_data = {"multi_users": organized_users}
+            st.subheader("Lista de Usuários Organizada")
+            st.markdown("Você pode clicar duas vezes em qualquer célula para editar diretamente na tabela antes de baixar.")
+
+            # Converte para DataFrame e exibe tabela editável
+            df_users = pd.DataFrame(organized_users)
+            edited_df = st.data_editor(df_users, num_rows="dynamic", use_container_width=True)
+
+            # Reconverte a tabela editada de volta para a estrutura JSON
+            edited_users = edited_df.to_dict(orient="records")
+            new_data = {"multi_users": edited_users}
 
             organized_content = json.dumps(new_data, indent=2, ensure_ascii=False)
 
             original_file_name, file_extension = os.path.splitext(uploaded_file.name)
             download_file_name = f"{original_file_name}_organized{file_extension}"
 
-            with st.expander("Clique para ver o conteúdo organizado"):
-                st.json(new_data)
-
+            st.markdown("---")
             st.download_button(
                 label="Clique para Baixar o Arquivo Organizado",
                 data=organized_content,
@@ -119,7 +127,7 @@ if uploaded_file is not None:
                 mime="application/octet-stream"
             )
 
-            st.info("Seu novo arquivo `.dev` foi gerado e está pronto para ser baixado. Você pode usá-lo para substituir o arquivo de backup original.")
+            st.info("Seu novo arquivo `.dev` foi gerado com as modificações da tabela e está pronto para ser baixado.")
 
         else:
             st.error("O arquivo `.dev` não contém a chave 'multi_users'. Por favor, verifique se o arquivo está no formato correto.")

@@ -4,136 +4,112 @@ import urllib3
 import ssl
 import urllib.request
 
+# Desabilitar avisos de segurança SSL
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-try:
-    from curl_cffi import requests as curl_requests
-    CURL_CFFI_AVAILABLE = True
-except ImportError:
-    CURL_CFFI_AVAILABLE = False
+st.set_page_config(page_title="Debugger Avançado IPTV v2", layout="wide")
+st.title("🕵️‍♂️ Debugger de Cabeçalhos - Quebrando o Nginx 406")
+st.write("Testando assinaturas profundas de motores de comunicação para contornar o bloqueio do painel.")
 
-HEADERS_BROWSER = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-    "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Connection": "keep-alive",
+URLS_TESTE = [
+    "http://websmt.ca/player_api.php?username=concmus03&password=3a3b3c3d",
+    "http://cdn.club8.ca/player_api.php?username=concmus03&password=3a3b3c3d",
+    "https://websmt.ca/player_api.php?username=mgerminia&password=iptv2022"
+]
+
+# Cenários ultra-específicos focados em ignorar assinaturas manjadas de scanners
+CENARIOS = {
+    "Cenário 1: Motor Android (okhttp)": {
+        "headers": {
+            "User-Agent": "okhttp/4.9.3",
+            "Accept-Encoding": "gzip"
+        },
+        "remover_accept": True
+    },
+    "Cenário 2: Motor FFmpeg Nativo (Lavf)": {
+        "headers": {
+            "User-Agent": "Lavf/59.27.100",
+            "Accept": "*/*"
+        },
+        "remover_accept": False
+    },
+    "Cenário 3: Player TiviMate Premium": {
+        "headers": {
+            "User-Agent": "TiviMate/4.7.0 (Linux; Android 11)",
+            "Accept": "*/*"
+        },
+        "remover_accept": False
+    },
+    "Cenário 4: Sem cabeçalho 'Accept' (Clean Mozilla)": {
+        "headers": {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        },
+        "remover_accept": True  # Remove o Accept padrão do Requests que gera o 406
+    },
+    "Cenário 5: Urllib Nativo sem metadados": {
+        "headers": {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+        },
+        "use_urllib": True
+    }
 }
 
-HEADERS_VLC = {
-    "User-Agent": "VLC/3.0.18 LibVLC/3.0.18",
-    "Accept": "*/*",
-    "Connection": "keep-alive",
-}
-
-class LegacySslAdapter(requests.adapters.HTTPAdapter):
-    def init_poolmanager(self, *args, **kwargs):
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        try:
-            ctx.set_ciphers('ALL:@SECLEVEL=0')
-        except:
-            pass
-        try:
-            ctx.options |= 0x4
-        except:
-            pass
-        kwargs['ssl_context'] = ctx
-        return super().init_poolmanager(*args, **kwargs)
-
-def render_result(label, resp_text=None, status_code=None, error=None, final_url=None):
-    if error:
-        st.error(f"**{label}** → ❌ `{error}`")
-    else:
-        has_user_info = "user_info" in resp_text
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            st.success(f"**{label}** → HTTP `{status_code}`")
-        with col2:
-            st.write("✅ `user_info`" if has_user_info else "❌ sem `user_info`")
-        if final_url:
-            st.caption(f"🔀 Redirect final: `{final_url}`")
-        if has_user_info:
-            idx = resp_text.find("user_info")
-            snippet = resp_text[max(0, idx - 10):idx + 200]
-            st.code(snippet, language="json")
-        else:
-            st.code(resp_text[:400], language="text")
-
-
-st.set_page_config(page_title="IPTV Debugger", layout="wide")
-st.title("🔍 IPTV Debugger")
-
-st.info("cole uma URL por linha no formato: `http://servidor.com/player_api.php?username=X&password=Y`")
-
-default_urls = """http://websmt.ca/player_api.php?username=concmus03&password=3a3b3c3d
-http://cdn.club8.ca/player_api.php?username=concmus03&password=3a3b3c3d
-https://websmt.ca/player_api.php?username=mgerminia&password=iptv2022"""
-
-urls_input = st.text_area("URLs para testar", value=default_urls, height=120)
-
-if not CURL_CFFI_AVAILABLE:
-    st.warning("⚠️ `curl_cffi` não instalado — Estratégia 1 será pulada. Instale com: `pip install curl_cffi`")
-
-if st.button("▶️ Rodar Debug", type="primary"):
-    urls = [u.strip() for u in urls_input.strip().splitlines() if u.strip()]
-
-    for url in urls:
-        st.markdown(f"---\n## 🌐 `{url}`")
-
-        # ── 5. Redirect manual (sem follow) ─────────────────────────────────
-        st.markdown("### 🔀 Redirect manual (`allow_redirects=False`)")
-        try:
-            r = requests.get(url, headers=HEADERS_BROWSER, verify=False, timeout=10, allow_redirects=False)
-            location = r.headers.get("Location", "—")
-            st.info(f"HTTP `{r.status_code}` → Location: `{location}`")
-        except Exception as e:
-            st.error(f"Erro: {e}")
-
-        # ── 1. curl_cffi ─────────────────────────────────────────────────────
-        st.markdown("### 1️⃣ curl_cffi (TLS Impersonation)")
-        if CURL_CFFI_AVAILABLE:
-            for imp in ["chrome120", "chrome110", "safari17_0", "chrome107"]:
+if st.button("⚡ Executar Nova Varredura de Diagnóstico"):
+    for url in URLS_TESTE:
+        st.markdown(f"### 🌐 Alvo: `{url}`")
+        
+        cols = st.columns(len(CENARIOS))
+        
+        for idx, (nome_cenario, config) in enumerate(CENARIOS.items()):
+            with cols[idx]:
+                st.info(nome_cenario)
                 try:
-                    r = curl_requests.get(url, impersonate=imp, timeout=10, allow_redirects=True, verify=False)
-                    render_result(f"curl_cffi / {imp}", r.text, r.status_code, final_url=r.url)
+                    # Implementação via URLLIB Nativo (Cenário 5)
+                    if config.get("use_urllib"):
+                        ssl_ctx = ssl._create_unverified_context()
+                        req = urllib.request.Request(url, headers=config["headers"])
+                        # O urllib nativo não injeta o cabeçalho 'Accept' automaticamente
+                        with urllib.request.urlopen(req, context=ssl_ctx, timeout=8) as response:
+                            content = response.read().decode('utf-8', errors='ignore')
+                            status = response.status
+                            url_final = response.geturl()
+                            sucesso = "user_info" in content
+                            response_text = content
+                    
+                    # Implementação via Requests Controlado (Cenários 1, 2, 3, 4)
+                    else:
+                        session = requests.Session()
+                        req = requests.Request('GET', url, headers=config["headers"])
+                        prepared = session.prepare_request(req)
+                        
+                        # Removemos o 'Accept' padrão do requests caso configurado para evitar o 406
+                        if config.get("remover_accept") and 'Accept' in prepared.headers:
+                            del prepared.headers['Accept']
+                            
+                        r = session.send(prepared, verify=False, timeout=8, allow_redirects=True)
+                        status = r.status_code
+                        url_final = r.url
+                        sucesso = "user_info" in r.text
+                        response_text = r.text
+                    
+                    # Exibição dos resultados na interface
+                    if sucesso:
+                        st.success(f"🟢 SUCESSO ({status})")
+                        st.balloons()
+                    elif status == 406:
+                        st.warning(f"🟡 Bloqueio 406")
+                    elif status == 403:
+                        st.error(f"🔴 Bloqueio 403")
+                    else:
+                        st.error(f"⚠️ Status: {status}")
+                        
+                    st.text(f"URL Final: {url_final}")
+                    st.write(f"Contém 'user_info'?: **{sucesso}**")
+                    
+                    with st.expander("Ver Resposta Bruta"):
+                        st.code(response_text[:250], language="html" if "html" in response_text else "json")
+                        
                 except Exception as e:
-                    render_result(f"curl_cffi / {imp}", error=str(e))
-        else:
-            st.warning("Pulado — curl_cffi não instalado")
-
-        # ── 2. requests padrão ───────────────────────────────────────────────
-        st.markdown("### 2️⃣ requests padrão")
-        for label, headers in [("Browser UA", HEADERS_BROWSER), ("VLC UA", HEADERS_VLC)]:
-            try:
-                r = requests.get(url, headers=headers, verify=False, timeout=10, allow_redirects=True)
-                render_result(f"requests / {label}", r.text, r.status_code, final_url=r.url)
-            except Exception as e:
-                render_result(f"requests / {label}", error=str(e))
-
-        # ── 3. SSL Legado ────────────────────────────────────────────────────
-        st.markdown("### 3️⃣ SSL Legado (SECLEVEL=0)")
-        for label, headers in [("Browser UA", HEADERS_BROWSER), ("VLC UA", HEADERS_VLC)]:
-            try:
-                with requests.Session() as s:
-                    s.mount("https://", LegacySslAdapter())
-                    r = s.get(url, headers=headers, verify=False, timeout=10, allow_redirects=True)
-                    render_result(f"ssl-legado / {label}", r.text, r.status_code, final_url=r.url)
-            except Exception as e:
-                render_result(f"ssl-legado / {label}", error=str(e))
-
-        # ── 4. urllib nativo ─────────────────────────────────────────────────
-        st.markdown("### 4️⃣ urllib nativo")
-        for label, headers in [("Browser UA", HEADERS_BROWSER), ("VLC UA", HEADERS_VLC)]:
-            try:
-                ssl_ctx = ssl._create_unverified_context()
-                req = urllib.request.Request(url, headers=headers)
-                with urllib.request.urlopen(req, context=ssl_ctx, timeout=10) as resp:
-                    content = resp.read().decode("utf-8", errors="ignore")
-                    render_result(f"urllib / {label}", content, resp.status, final_url=resp.url)
-            except Exception as e:
-                render_result(f"urllib / {label}", error=str(e))
-
-    st.markdown("---")
-    st.success("✅ Debug completo!")
+                    st.error(f"💥 Erro: {type(e).__name__}")
+                    st.caption(str(e))
+        st.markdown("---")

@@ -4,26 +4,61 @@ import re
 import os
 import pandas as pd
 from functools import cmp_to_key
+import requests
+import urllib3
+from urllib.parse import quote, unquote
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# Desabilitar avisos de segurança SSL
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# Cabeçalhos para simular o navegador nas requisições de teste
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "*/*",
+    "Connection": "keep-alive"
+}
+
+def test_single_user(user):
+    """Testa se o usuário está ativo ou offline via Xtream API e atualiza o emoji no nome."""
+    url = user.get('url', '')
+    name = user.get('name', '')
+
+    # Remove emoji de status antigo (✅ ou ❌) se já existir no início do nome
+    name = re.sub(r'^[✅❌]\s*', '', name)
+
+    # Extrai as credenciais da URL
+    user_match = re.search(r"username=([^&]+)", url)
+    pass_match = re.search(r"password=([^&]+)", url)
+    base_match = re.search(r"(https?://[^/]+)", url)
+
+    status = "offline"
+    if user_match and pass_match and base_match:
+        username = unquote(user_match.group(1))
+        password = unquote(pass_match.group(1))
+        base = base_match.group(1)
+
+        api_url = f"{base}/player_api.php?username={quote(username)}&password={quote(password)}"
+        try:
+            resp = requests.get(api_url, headers=HEADERS, verify=False, timeout=8)
+            if "user_info" in resp.json():
+                status = "active"
+        except:
+            pass
+
+    # Define o novo emoji com base no status atualizado
+    user['name'] = f"✅ {name}" if status == "active" else f"❌ {name}"
+    return user
 
 def sort_users(users_list):
-    """
-    Organiza a lista de usuários com base das regras de ordenação:
-    1. Nome com 👎.
-    2. Nomes com letras/palavras, priorizando a palavra final (Z-A).
-    3. Emojis na ordem inversa.
-    4. Nomes "Teste" por último.
-    5. Como desempate, altera a URL por ordem alfabética de Z até A.
-    """
+    """Organiza a lista de usuários com base nas regras de ordenação."""
     def get_emoji_sort_key(name):
-        # Define a ordem de prioridade dos emojis (da mais alta para a mais baixa)
-        priority_order = ['❌', '📺', '🔞', '🟢', '💧', '🔥']
-        
-        # Cria a chave de ordenação com base na prioridade de cada emoji na sequência
+        # Incluído o ✅ na prioridade de ordenação de emojis
+        priority_order = ['❌', '✅', '📺', '🔞', '🟢', '💧', '🔥']
         sort_key = []
         for emoji in name:
             if emoji in priority_order:
                 sort_key.append(priority_order.index(emoji))
-        
         return tuple(sort_key)
 
     def compare_users(user1, user2):
@@ -97,10 +132,18 @@ if uploaded_file is not None:
         data = json.loads(file_content)
 
         if "multi_users" in data:
-            st.success("Arquivo lido com sucesso! Processando...")
-
             original_users = data["multi_users"]
-            organized_users = sort_users(original_users)
+
+            # Processamento em paralelo para testar o status de todos os usuários de forma rápida
+            with st.spinner("⚡ Testando status dos servidores de IPTV..."):
+                tested_users = []
+                with ThreadPoolExecutor(max_workers=10) as executor:
+                    futures = [executor.submit(test_single_user, user) for user in original_users]
+                    for future in as_completed(futures):
+                        tested_users.append(future.result())
+
+            st.success("Análise de status concluída com sucesso!")
+            organized_users = sort_users(tested_users)
 
             st.subheader("Lista de Usuários Organizada")
 
@@ -116,7 +159,7 @@ if uploaded_file is not None:
             if 'url' in cols:
                 ordered_cols.append('url')
                 cols.remove('url')
-            ordered_cols.extend(cols)  # Inclui as colunas ocultas (userid, type, etc.)
+            ordered_cols.extend(cols)
             df_users = df_users[ordered_cols]
 
             # Exibe a tabela editável e oculta as colunas 'userid' e 'type' da interface

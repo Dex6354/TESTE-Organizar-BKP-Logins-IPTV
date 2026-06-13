@@ -13,6 +13,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # Desabilitar avisos de segurança SSL
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+# Tenta importar curl_cffi para TLS fingerprint impersonation
+try:
+    from curl_cffi import requests as curl_requests
+    CURL_CFFI_AVAILABLE = True
+except ImportError:
+    CURL_CFFI_AVAILABLE = False
+
 # Configurações de cabeçalhos realistas
 HEADERS_BROWSER = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -43,6 +50,15 @@ class LegacySslAdapter(requests.adapters.HTTPAdapter):
             pass
         kwargs['ssl_context'] = ctx
         return super(LegacySslAdapter, self).init_poolmanager(*args, **kwargs)
+
+def check_content(content):
+    """Verifica o conteúdo da resposta e retorna 'active', 'offline' ou None."""
+    if "user_info" not in content:
+        return None
+    content_clean = content.replace(" ", "")
+    if '"status":"Expired"' in content_clean or '"status":"expired"' in content_clean:
+        return "offline"
+    return "active"
 
 def test_single_user(user):
     """Testa o status do usuário com fallbacks para servidores modernos, legados e redirecionamentos."""
@@ -94,62 +110,75 @@ def test_single_user(user):
             if found_active:
                 break
 
-            # ESTRATÉGIA 1: Conexão Moderna (Padrão do navegador - Resolve websmt.ca)
+            # ESTRATÉGIA 1: curl_cffi — TLS Fingerprint Impersonation (Resolve websmt.ca e similares)
+            if CURL_CFFI_AVAILABLE:
+                for impersonate in ["chrome120", "chrome110", "safari17_0"]:
+                    try:
+                        resp = curl_requests.get(
+                            target_url,
+                            impersonate=impersonate,
+                            timeout=8,
+                            allow_redirects=True,
+                            verify=False
+                        )
+                        result = check_content(resp.text)
+                        if result is not None:
+                            status = result
+                            found_active = True
+                            break
+                    except Exception:
+                        continue
+                if found_active:
+                    break
+
+            # ESTRATÉGIA 2: Conexão Moderna (Padrão do navegador)
             for headers in [HEADERS_BROWSER, HEADERS_VLC]:
                 try:
                     resp = requests.get(target_url, headers=headers, verify=False, timeout=8, allow_redirects=True)
-                    content = resp.text
-                    if "user_info" in content:
-                        if '"status":"Expired"' in content.replace(" ", "") or '"status":"expired"' in content.replace(" ", ""):
-                            status = "offline"
-                        else:
-                            status = "active"
+                    result = check_content(resp.text)
+                    if result is not None:
+                        status = result
                         found_active = True
                         break
-                except:
+                except Exception:
                     continue
 
             if found_active:
                 break
 
-            # ESTRATÉGIA 2: Conexão Legada (Força SECLEVEL=0 - Resolve odira.sbs)
+            # ESTRATÉGIA 3: Conexão Legada (Força SECLEVEL=0 — Resolve odira.sbs)
             try:
                 with requests.Session() as session:
                     session.mount("https://", LegacySslAdapter())
                     for headers in [HEADERS_BROWSER, HEADERS_VLC]:
                         try:
                             resp = session.get(target_url, headers=headers, verify=False, timeout=8, allow_redirects=True)
-                            content = resp.text
-                            if "user_info" in content:
-                                if '"status":"Expired"' in content.replace(" ", "") or '"status":"expired"' in content.replace(" ", ""):
-                                    status = "offline"
-                                else:
-                                    status = "active"
+                            result = check_content(resp.text)
+                            if result is not None:
+                                status = result
                                 found_active = True
                                 break
-                        except:
+                        except Exception:
                             continue
-            except:
+            except Exception:
                 pass
 
             if found_active:
                 break
 
-            # ESTRATÉGIA 3: Fallback Nativo do Sistema (urllib)
+            # ESTRATÉGIA 4: Fallback Nativo do Sistema (urllib)
             for headers in [HEADERS_BROWSER, HEADERS_VLC]:
                 try:
                     ssl_ctx = ssl._create_unverified_context()
                     req = urllib.request.Request(target_url, headers=headers)
                     with urllib.request.urlopen(req, context=ssl_ctx, timeout=8) as response:
                         content = response.read().decode('utf-8', errors='ignore')
-                        if "user_info" in content:
-                            if '"status":"Expired"' in content.replace(" ", "") or '"status":"expired"' in content.replace(" ", ""):
-                                status = "offline"
-                            else:
-                                status = "active"
+                        result = check_content(content)
+                        if result is not None:
+                            status = result
                             found_active = True
                             break
-                except:
+                except Exception:
                     continue
 
     # Define o novo emoji com base no status atualizado
@@ -192,6 +221,9 @@ def sort_users(users_list):
 
 st.set_page_config(page_title="Organizador de Logins", layout="centered")
 st.subheader("Organizador de Logins .dev")
+
+if not CURL_CFFI_AVAILABLE:
+    st.warning("⚠️ `curl_cffi` não instalado. Alguns servidores com TLS fingerprinting (ex: websmt.ca) podem falhar. Instale com: `pip install curl_cffi`")
 
 uploaded_file = st.file_uploader("Escolha um arquivo .dev", type="dev")
 

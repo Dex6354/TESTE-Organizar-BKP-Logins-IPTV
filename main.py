@@ -106,3 +106,35 @@ if st.button("▶️ Rodar Debug", type="primary"):
                     break
                 try:
                     r = curl_requests.get(
+                        url, impersonate=imp, headers=HEADERS_CHROME_FULL,
+                        timeout=12, allow_redirects=True, verify=False
+                    )
+                    found = render(f"curl_cffi+Sec-Fetch / {imp}", r.text, r.status_code, r.url, headers=r.headers)
+                except Exception as e:
+                    render(f"curl_cffi+Sec-Fetch / {imp}", error=str(e))
+
+        # ── requests padrão + Sec-Fetch headers ─────────────────────────────
+        if not found:
+            st.markdown("### 🌐 requests + Sec-Fetch headers")
+            try:
+                r = requests.get(url, headers=HEADERS_CHROME_FULL, verify=False, timeout=12, allow_redirects=True)
+                found = render("requests + Sec-Fetch", r.text, r.status_code, r.url, headers=r.headers)
+            except Exception as e:
+                render("requests + Sec-Fetch", error=str(e))
+
+        # ── Sem SSL verify + sem headers ─────────────────────────────────────
+        if not found:
+            st.markdown("### 🔓 requests sem verify, sem headers")
+            try:
+                r = requests.get(url, verify=False, timeout=12, allow_redirects=True)
+                found = render("requests / sem headers", r.text, r.status_code, r.url, headers=r.headers)
+            except Exception as e:
+                render("requests / sem headers", error=str(e))
+
+        if found:
+            st.balloons()
+        else:
+            st.error("⛔ Nenhuma estratégia funcionou para esta URL.")
+
+    st.markdown("---")
+    st.success("✅ Debug completo!")

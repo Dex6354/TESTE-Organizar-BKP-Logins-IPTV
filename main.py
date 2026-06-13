@@ -1,128 +1,108 @@
 import streamlit as st
+import subprocess
+import sys
 import requests
 import urllib3
-from urllib.parse import urlparse, parse_qs
+import ssl
 
-# Desabilitar avisos de segurança SSL
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-st.set_page_config(page_title="Debugger Avançado IPTV v3", layout="wide")
-st.title("🕵️‍♂️ Debugger IPTV - Quebrando Bloqueio Estrutural")
-st.write("Testando emulação total de navegador, interceptação de rota e requisições via POST.")
+st.set_page_config(page_title="IPTV Debugger v3", layout="wide")
+st.title("🔍 IPTV Debugger v3 — Diagnóstico Cloudflare")
 
-URLS_TESTE = [
-    "http://websmt.ca/player_api.php?username=concmus03&password=3a3b3c3d",
-    "http://cdn.club8.ca/player_api.php?username=concmus03&password=3a3b3c3d",
-    "https://websmt.ca/player_api.php?username=mgerminia&password=iptv2022"
-]
+# ── Instalar curl_cffi ───────────────────────────────────────────────────────
+st.markdown("### 📦 Status do curl_cffi")
 
-if st.button("⚡ Executar Varredura Avançada"):
-    for url in URLS_TESTE:
-        st.markdown(f"### 🌐 Alvo: `{url}`")
-        
-        # Decompõe a URL para extrair o Host e os dados de login dinamicamente
-        parsed_url = urlparse(url)
-        host = parsed_url.netloc
-        queries = parse_qs(parsed_url.query)
-        username = queries.get('username', [''])[0]
-        password = queries.get('password', [''])[0]
-        base_api = f"{parsed_url.scheme}://{host}/player_api.php"
+try:
+    from curl_cffi import requests as curl_requests
+    st.success("✅ curl_cffi já instalado!")
+    CURL_CFFI_AVAILABLE = True
+except ImportError:
+    CURL_CFFI_AVAILABLE = False
+    st.error("❌ curl_cffi não instalado.")
+    if st.button("⬇️ Instalar curl_cffi agora"):
+        with st.spinner("Instalando curl_cffi..."):
+            result = subprocess.run(
+                [sys.executable, "-m", "pip", "install", "curl_cffi"],
+                capture_output=True, text=True
+            )
+        if result.returncode == 0:
+            st.success("✅ Instalado com sucesso! Recarregue a página (F5) e rode o debug novamente.")
+            st.code(result.stdout)
+        else:
+            st.error("❌ Erro na instalação:")
+            st.code(result.stderr)
+    st.stop()
 
-        # Novos cenários cirúrgicos para burlar a regra do Nginx
-        CENARIOS = {
-            "1. Strict JSON Client": {
-                "method": "GET",
-                "url": url,
-                "headers": {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-                    "Accept": "application/json, text/javascript, */*; q=0.01"
-                },
-                "allow_redirects": True
-            },
-            "2. Chrome Real Completo": {
-                "method": "GET",
-                "url": url,
-                "headers": {
-                    "Host": host,
-                    "Connection": "keep-alive",
-                    "Upgrade-Insecure-Requests": "1",
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-                    "Sec-Fetch-Site": "none",
-                    "Sec-Fetch-Mode": "navigate",
-                    "Sec-Fetch-User": "?1",
-                    "Sec-Fetch-Dest": "document",
-                    "Accept-Encoding": "gzip, deflate",
-                    "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8"
-                },
-                "allow_redirects": True
-            },
-            "3. Travar Redirecionamento": {
-                "method": "GET",
-                "url": url,
-                "headers": {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-                    "Accept": "*/*"
-                },
-                "allow_redirects": False
-            },
-            "4. Método POST (URL)": {
-                "method": "POST",
-                "url": url,
-                "headers": {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-                    "Accept": "*/*"
-                },
-                "allow_redirects": True
-            },
-            "5. Método POST (Form Data)": {
-                "method": "POST_DATA",
-                "url": base_api,
-                "data": {"username": username, "password": password},
-                "headers": {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-                    "Accept": "application/json, */*"
-                },
-                "allow_redirects": True
-            }
-        }
+# ── URLs de teste ────────────────────────────────────────────────────────────
+default_urls = """https://websmt.ca/player_api.php?username=concmus03&password=3a3b3c3d
+http://websmt.ca/player_api.php?username=concmus03&password=3a3b3c3d
+http://cdn.club8.ca/player_api.php?username=concmus03&password=3a3b3c3d
+https://websmt.ca/player_api.php?username=mgerminia&password=iptv2022"""
 
-        cols = st.columns(len(CENARIOS))
-        
-        for idx, (nome_cenario, conf) in enumerate(CENARIOS.items()):
-            with cols[idx]:
-                st.info(nome_cenario)
+urls_input = st.text_area("URLs para testar", value=default_urls, height=130)
+
+IMPERSONATIONS = ["chrome120", "chrome110", "chrome107", "safari17_0", "safari15_5", "firefox117"]
+
+# Headers extras com Sec-Fetch (idênticos ao Chrome real)
+HEADERS_CHROME_FULL = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"Windows"',
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
+    "Connection": "keep-alive",
+}
+
+def render(label, text=None, code=None, url=None, error=None, headers=None):
+    if error:
+        st.error(f"**{label}** ❌ `{error}`")
+        return False
+    has = "user_info" in text
+    if has:
+        st.success(f"**{label}** → HTTP `{code}` ✅ **user_info ENCONTRADO!**")
+        if url:
+            st.caption(f"🔀 URL final: `{url}`")
+        idx = text.find("user_info")
+        st.code(text[max(0, idx-5):idx+400], language="json")
+    else:
+        st.warning(f"**{label}** → HTTP `{code}` ❌ sem user_info")
+        if url:
+            st.caption(f"🔀 URL final: `{url}`")
+        if headers:
+            with st.expander("Ver response headers"):
+                st.json(dict(headers))
+        st.code(text[:300], language="text")
+    return has
+
+if st.button("▶️ Rodar Debug", type="primary"):
+    urls = [u.strip() for u in urls_input.strip().splitlines() if u.strip()]
+
+    for url in urls:
+        st.markdown(f"---\n## 🌐 `{url}`")
+        found = False
+
+        # ── curl_cffi — prioridade máxima ────────────────────────────────────
+        st.markdown("### 🦾 curl_cffi (TLS Fingerprint)")
+        for imp in IMPERSONATIONS:
+            if found:
+                break
+            try:
+                r = curl_requests.get(url, impersonate=imp, timeout=12, allow_redirects=True, verify=False)
+                found = render(f"curl_cffi / {imp}", r.text, r.status_code, r.url, headers=r.headers)
+            except Exception as e:
+                render(f"curl_cffi / {imp}", error=str(e))
+
+        # ── curl_cffi + headers Sec-Fetch ────────────────────────────────────
+        if not found:
+            st.markdown("### 🦾 curl_cffi + headers Sec-Fetch")
+            for imp in ["chrome120", "chrome110"]:
+                if found:
+                    break
                 try:
-                    # Executa a requisição conforme a estratégia configurada
-                    if conf["method"] == "GET":
-                        r = requests.get(conf["url"], headers=conf["headers"], verify=False, timeout=8, allow_redirects=conf["allow_redirects"])
-                    elif conf["method"] == "POST":
-                        r = requests.post(conf["url"], headers=conf["headers"], verify=False, timeout=8, allow_redirects=conf["allow_redirects"])
-                    elif conf["method"] == "POST_DATA":
-                        r = requests.post(conf["url"], data=conf["data"], headers=conf["headers"], verify=False, timeout=8, allow_redirects=conf["allow_redirects"])
-                    
-                    status = r.status_code
-                    sucesso = "user_info" in r.text
-                    
-                    if sucesso:
-                        st.success(f"🟢 SUCESSO ({status})")
-                        st.balloons()
-                    elif status == 406:
-                        st.warning(f"🟡 Bloqueio 406")
-                    elif status == 403:
-                        st.error(f"🔴 Bloqueio 403")
-                    else:
-                        st.error(f"⚠️ Status: {status}")
-                        
-                    st.text(f"URL Final: {r.url}")
-                    st.write(f"Contém 'user_info'?: **{sucesso}**")
-                    
-                    with st.expander("Ver Cabeçalhos de Resposta"):
-                        st.json(dict(r.headers))
-                    with st.expander("Ver Resposta Bruta"):
-                        st.code(r.text[:250], language="html" if "html" in r.text else "json")
-                        
-                except Exception as e:
-                    st.error(f"💥 Erro: {type(e).__name__}")
-                    st.caption(str(e))
-        st.markdown("---")
+                    r = curl_requests.get(

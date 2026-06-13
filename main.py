@@ -139,7 +139,6 @@ if uploaded_file is not None:
             original_file_name, file_extension = os.path.splitext(uploaded_file.name)
             download_file_name = f"{original_file_name}_organized{file_extension}"
 
-            st.markdown("---")
             st.download_button(
                 label="Clique para Baixar o Arquivo Organizado",
                 data=organized_content,

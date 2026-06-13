@@ -12,7 +12,7 @@ def sort_users(users_list):
     2. Nomes com letras/palavras, priorizando a palavra final (Z-A).
     3. Emojis na ordem inversa.
     4. Nomes "Teste" por último.
-    5. Como desempate, ordena a URL por ordem alfabética de Z até A.
+    5. Como desempate, altera a URL por ordem alfabética de Z até A.
     """
     def get_emoji_sort_key(name):
         # Define a ordem de prioridade dos emojis (da mais alta para a mais baixa)
@@ -109,22 +109,30 @@ if uploaded_file is not None:
             # Converte para DataFrame
             df_users = pd.DataFrame(organized_users)
             
-            # Reorganiza as colunas: 'name' passa a ser a primeira coluna
+            # Reorganiza as colunas: 'name' em primeiro e 'url' em segundo
             cols = list(df_users.columns)
+            ordered_cols = []
             if 'name' in cols:
+                ordered_cols.append('name')
                 cols.remove('name')
-                cols.insert(0, 'name')
-            df_users = df_users[cols]
+            if 'url' in cols:
+                ordered_cols.append('url')
+                cols.remove('url')
+            ordered_cols.extend(cols)  # Inclui as colunas ocultas (userid, type, etc.)
+            df_users = df_users[ordered_cols]
 
-            # Exibe a tabela editável e oculta a coluna 'userid' da interface
+            # Exibe a tabela editável e oculta as colunas 'userid' e 'type' da interface
             edited_df = st.data_editor(
                 df_users, 
                 num_rows="dynamic", 
                 use_container_width=True,
-                column_config={"userid": None}  # Esconde a coluna sem removê-la dos dados
+                column_config={
+                    "userid": None,
+                    "type": None
+                }
             )
 
-            # Reconverte a tabela editada de volta para a estrutura JSON (mantendo o userid oculto)
+            # Reconverte a tabela editada de volta para a estrutura JSON
             edited_users = edited_df.to_dict(orient="records")
             new_data = {"multi_users": edited_users}
 

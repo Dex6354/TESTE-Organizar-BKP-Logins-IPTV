@@ -13,14 +13,28 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # Desabilitar avisos de segurança SSL
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+# Configurações de cabeçalhos realistas
+HEADERS_BROWSER = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Connection": "keep-alive"
+}
+
+HEADERS_VLC = {
+    "User-Agent": "VLC/3.0.18 LibVLC/3.0.18",
+    "Accept": "*/*",
+    "Connection": "keep-alive"
+}
+
 class LegacySslAdapter(requests.adapters.HTTPAdapter):
-    """Adaptador SSL para compatibilidade máxima com cifras antigas e servidores legados."""
+    """Adaptador SSL para compatibilidade com cifras antigas e servidores legados."""
     def init_poolmanager(self, *args, **kwargs):
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
         try:
-            ctx.set_ciphers('ALL:@SECLEVEL=0')  # Permite qualquer cifra e reduz nível de segurança ao mínimo
+            ctx.set_ciphers('ALL:@SECLEVEL=0')
         except:
             pass
         try:
@@ -31,14 +45,14 @@ class LegacySslAdapter(requests.adapters.HTTPAdapter):
         return super(LegacySslAdapter, self).init_poolmanager(*args, **kwargs)
 
 def test_single_user(user):
-    """Testa se o usuário está ativo ou offline via Xtream API com múltiplos fallbacks de agentes e bibliotecas."""
+    """Testa o status do usuário com fallbacks para servidores modernos, legados e redirecionamentos."""
     name = user.get('name', '')
     url = user.get('url', '')
 
     # Remove emoji de status antigo (✅ ou ❌) se já existir no início do nome
     name = re.sub(r'^[✅❌]\s*', '', name)
 
-    # 1. Tenta obter usuário das chaves dedicadas ou extrai da URL se não existirem
+    # 1. Extrai ou obtém o usuário
     username = user.get('username') or user.get('user', '')
     if not username:
         user_match = re.search(r"username=([^&]+)", url, re.IGNORECASE)
@@ -46,7 +60,7 @@ def test_single_user(user):
     else:
         username = unquote(str(username))
 
-    # 2. Tenta obter a senha das chaves dedicadas ou extrai da URL se não existirem
+    # 2. Extrai ou obtém a senha
     password = user.get('password') or user.get('pass', '')
     if not password:
         pass_match = re.search(r"password=([^&]+)", url, re.IGNORECASE)
@@ -54,7 +68,7 @@ def test_single_user(user):
     else:
         password = unquote(str(password))
 
-    # 3. Identifica e higieniza a URL base do servidor
+    # 3. Higieniza a URL base
     base_match = re.search(r"(https?://[^/]+)", url)
     base = base_match.group(1) if base_match else url
     if base:
@@ -64,23 +78,15 @@ def test_single_user(user):
 
     status = "offline"
 
-    # Executa o teste caso possua todos os dados necessários
     if username and password and base:
         api_url = f"{base}/player_api.php?username={quote(username)}&password={quote(password)}"
         
-        # Lista de variações de protocolos para testar alternadamente
+        # Gera variações de protocolo para cobrir redirecionamentos estritos de portas
         urls_to_test = [api_url]
         if api_url.startswith("https://"):
             urls_to_test.append(api_url.replace("https://", "http://", 1))
         elif api_url.startswith("http://"):
             urls_to_test.append(api_url.replace("http://", "https://", 1))
-
-        # Lista de User-Agents: Navegador Padrão vs Players de Mídia (frequentemente em Whitelist de WAFs)
-        user_agents = [
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "VLC/3.0.18 LibVLC/3.0.18",
-            "IPTVSmartersPlayer"
-        ]
 
         found_active = False
 
@@ -88,22 +94,54 @@ def test_single_user(user):
             if found_active:
                 break
 
-            for ua in user_agents:
-                headers = {
-                    "User-Agent": ua,
-                    "Accept": "*/*",
-                    "Connection": "keep-alive"
-                }
-
-                # MÉTODO 1: Requests com tratamento permissivo de resposta e SSL
+            # ESTRATÉGIA 1: Conexão Moderna (Padrão do navegador - Resolve websmt.ca)
+            for headers in [HEADERS_BROWSER, HEADERS_VLC]:
                 try:
-                    with requests.Session() as session:
-                        session.mount("https://", LegacySslAdapter())
-                        # Remove a trava estrita do status_code == 200 (alguns firewalls respondem em blocos alternativos)
-                        resp = session.get(target_url, headers=headers, verify=False, timeout=10)
-                        resp.encoding = resp.apparent_encoding
-                        content = resp.text
+                    resp = requests.get(target_url, headers=headers, verify=False, timeout=8, allow_redirects=True)
+                    content = resp.text
+                    if "user_info" in content:
+                        if '"status":"Expired"' in content.replace(" ", "") or '"status":"expired"' in content.replace(" ", ""):
+                            status = "offline"
+                        else:
+                            status = "active"
+                        found_active = True
+                        break
+                except:
+                    continue
 
+            if found_active:
+                break
+
+            # ESTRATÉGIA 2: Conexão Legada (Força SECLEVEL=0 - Resolve odira.sbs)
+            try:
+                with requests.Session() as session:
+                    session.mount("https://", LegacySslAdapter())
+                    for headers in [HEADERS_BROWSER, HEADERS_VLC]:
+                        try:
+                            resp = session.get(target_url, headers=headers, verify=False, timeout=8, allow_redirects=True)
+                            content = resp.text
+                            if "user_info" in content:
+                                if '"status":"Expired"' in content.replace(" ", "") or '"status":"expired"' in content.replace(" ", ""):
+                                    status = "offline"
+                                else:
+                                    status = "active"
+                                found_active = True
+                                break
+                        except:
+                            continue
+            except:
+                pass
+
+            if found_active:
+                break
+
+            # ESTRATÉGIA 3: Fallback Nativo do Sistema (urllib)
+            for headers in [HEADERS_BROWSER, HEADERS_VLC]:
+                try:
+                    ssl_ctx = ssl._create_unverified_context()
+                    req = urllib.request.Request(target_url, headers=headers)
+                    with urllib.request.urlopen(req, context=ssl_ctx, timeout=8) as response:
+                        content = response.read().decode('utf-8', errors='ignore')
                         if "user_info" in content:
                             if '"status":"Expired"' in content.replace(" ", "") or '"status":"expired"' in content.replace(" ", ""):
                                 status = "offline"
@@ -112,28 +150,7 @@ def test_single_user(user):
                             found_active = True
                             break
                 except:
-                    pass
-
-                # MÉTODO 2: Fallback para urllib nativo (ignora problemas de pool de conexões/erros de chunking do requests)
-                if not found_active:
-                    try:
-                        ssl_ctx = ssl._create_unverified_context()
-                        try:
-                            ssl_ctx.set_ciphers('ALL:@SECLEVEL=0')
-                        except:
-                            pass
-                        req = urllib.request.Request(target_url, headers=headers)
-                        with urllib.request.urlopen(req, context=ssl_ctx, timeout=10) as response:
-                            content = response.read().decode('utf-8', errors='ignore')
-                            if "user_info" in content:
-                                if '"status":"Expired"' in content.replace(" ", "") or '"status":"expired"' in content.replace(" ", ""):
-                                    status = "offline"
-                                else:
-                                    status = "active"
-                                found_active = True
-                                break
-                    except:
-                        pass
+                    continue
 
     # Define o novo emoji com base no status atualizado
     user['name'] = f"✅ {name}" if status == "active" else f"❌ {name}"

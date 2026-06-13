@@ -106,8 +106,20 @@ if uploaded_file is not None:
             st.subheader("Lista de Usuários Organizada")
             st.markdown("Você pode clicar duas vezes em qualquer célula para editar diretamente na tabela antes de baixar.")
 
-            # Converte para DataFrame e exibe tabela editável
+            # Converte para DataFrame
             df_users = pd.DataFrame(organized_users)
+            
+            # Reorganiza as colunas: 'url' como a primeira e 'userid' como a última
+            cols = list(df_users.columns)
+            if 'url' in cols:
+                cols.remove('url')
+                cols.insert(0, 'url')
+            if 'userid' in cols:
+                cols.remove('userid')
+                cols.append('userid')
+            df_users = df_users[cols]
+
+            # Exibe a tabela editável com o novo mapeamento de colunas
             edited_df = st.data_editor(df_users, num_rows="dynamic", use_container_width=True)
 
             # Reconverte a tabela editada de volta para a estrutura JSON

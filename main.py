@@ -5,6 +5,7 @@ import os
 import pandas as pd
 import requests
 import urllib3
+import ssl
 from urllib.parse import quote, unquote
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -19,6 +20,21 @@ HEADERS = {
     "Connection": "keep-alive",
     "Upgrade-Insecure-Requests": "1"
 }
+
+class LegacySslAdapter(requests.adapters.HTTPAdapter):
+    """Adaptador SSL para permitir conexões com servidores IPTV que usam criptografia antiga/legada."""
+    def init_poolmanager(self, *args, **kwargs):
+        ctx = ssl.create_default_context()
+        try:
+            ctx.set_ciphers('DEFAULT@SECLEVEL=1')  # Permite chaves menores e ciphers antigos
+        except:
+            pass
+        try:
+            ctx.options |= 0x4  # OP_LEGACY_SERVER_CONNECT (ignora restrições rígidas de handshake)
+        except:
+            pass
+        kwargs['ssl_context'] = ctx
+        return super(LegacySslAdapter, self).init_poolmanager(*args, **kwargs)
 
 def test_single_user(user):
     """Testa se o usuário está ativo ou offline via Xtream API e atualiza o emoji no nome."""
@@ -57,32 +73,44 @@ def test_single_user(user):
     # Executa o teste caso possua todos os dados necessários
     if username and password and base:
         api_url = f"{base}/player_api.php?username={quote(username)}&password={quote(password)}"
-        try:
-            resp = requests.get(api_url, headers=HEADERS, verify=False, timeout=15)
-            if resp.status_code == 200:
-                resp.encoding = resp.apparent_encoding
-                content = resp.text
-                
-                # Validação resiliente para evitar falsos negativos por quebra de encoding ou formato do painel
-                if "user_info" in content:
-                    try:
-                        data_json = resp.json()
-                        if isinstance(data_json, dict):
-                            user_status = data_json.get("user_info", {}).get("status")
-                            if str(user_status).strip().lower() == "expired":
+        
+        # Estratégia de tentativa: se HTTPS falhar por SSL, tenta via HTTP puro
+        urls_to_test = [api_url]
+        if api_url.startswith("https://"):
+            urls_to_test.append(api_url.replace("https://", "http://", 1))
+
+        for target_url in urls_to_test:
+            try:
+                with requests.Session() as session:
+                    session.mount("https://", LegacySslAdapter())
+                    resp = session.get(target_url, headers=HEADERS, verify=False, timeout=12)
+                    
+                    resp.encoding = resp.apparent_encoding
+                    content = resp.text
+                    
+                    # Se encontrou a estrutura padrão do Xtream, valida o conteúdo
+                    if "user_info" in content:
+                        try:
+                            data_json = resp.json()
+                            if isinstance(data_json, dict):
+                                user_status = data_json.get("user_info", {}).get("status")
+                                if str(user_status).strip().lower() == "expired":
+                                    status = "offline"
+                                else:
+                                    status = "active"
+                            else:
+                                status = "active"
+                        except:
+                            # Fallback em texto puro caso o JSON venha malformado pelo painel
+                            if '"status":"Expired"' in content.replace(" ", "") or '"status":"expired"' in content.replace(" ", ""):
                                 status = "offline"
                             else:
                                 status = "active"
-                        else:
-                            status = "active"
-                    except:
-                        # Fallback: Se houver erro de parsing do JSON, valida direto por string no texto estruturado
-                        if '"status":"Expired"' in content.replace(" ", "") or '"status":"expired"' in content.replace(" ", ""):
-                            status = "offline"
-                        else:
-                            status = "active"
-        except:
-            pass
+                        
+                        # Se achou uma resposta válida, não precisa tentar o próximo fallback (HTTP)
+                        break
+            except:
+                continue
 
     # Define o novo emoji com base no status atualizado
     user['name'] = f"✅ {name}" if status == "active" else f"❌ {name}"

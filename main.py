@@ -63,7 +63,6 @@ def test_single_user(user):
             base = 'http://' + base
 
     status = "offline"
-    retorno_code = "Erro/Timeout"
 
     # Executa o teste caso possua todos os dados necessários
     if username and password and base:
@@ -100,8 +99,8 @@ def test_single_user(user):
                 try:
                     with requests.Session() as session:
                         session.mount("https://", LegacySslAdapter())
+                        # Remove a trava estrita do status_code == 200 (alguns firewalls respondem em blocos alternativos)
                         resp = session.get(target_url, headers=headers, verify=False, timeout=10)
-                        retorno_code = str(resp.status_code)
                         resp.encoding = resp.apparent_encoding
                         content = resp.text
 
@@ -115,7 +114,7 @@ def test_single_user(user):
                 except:
                     pass
 
-                # MÉTODO 2: Fallback para urllib nativo
+                # MÉTODO 2: Fallback para urllib nativo (ignora problemas de pool de conexões/erros de chunking do requests)
                 if not found_active:
                     try:
                         ssl_ctx = ssl._create_unverified_context()
@@ -125,7 +124,6 @@ def test_single_user(user):
                             pass
                         req = urllib.request.Request(target_url, headers=headers)
                         with urllib.request.urlopen(req, context=ssl_ctx, timeout=10) as response:
-                            retorno_code = str(response.getcode())
                             content = response.read().decode('utf-8', errors='ignore')
                             if "user_info" in content:
                                 if '"status":"Expired"' in content.replace(" ", "") or '"status":"expired"' in content.replace(" ", ""):
@@ -134,14 +132,11 @@ def test_single_user(user):
                                     status = "active"
                                 found_active = True
                                 break
-                    except urllib.error.HTTPError as e:
-                        retorno_code = str(e.code)
                     except:
                         pass
 
     # Define o novo emoji com base no status atualizado
     user['name'] = f"✅ {name}" if status == "active" else f"❌ {name}"
-    user['retorno'] = retorno_code
     
     # Monta a URL JSON final para a tabela clicável
     if username and password and base:
@@ -206,15 +201,13 @@ if uploaded_file is not None:
             df_users = pd.DataFrame(organized_users)
             
             cols = list(df_users.columns)
-            for c in ['name', 'retorno', 'url', 'json_link']:
+            for c in ['name', 'url', 'json_link']:
                 if c in cols:
                     cols.remove(c)
             
             ordered_cols = []
             if 'name' in df_users.columns:
                 ordered_cols.append('name')
-            if 'retorno' in df_users.columns:
-                ordered_cols.append('retorno')
             if 'url' in df_users.columns:
                 ordered_cols.append('url')
                 
@@ -232,16 +225,14 @@ if uploaded_file is not None:
                 column_config={
                     "userid": None,
                     "type": None,
-                    "retorno": st.column_config.TextColumn("Retorno HTTP", help="Código de status HTTP retornado pelo servidor"),
                     "json_link": st.column_config.LinkColumn("Link JSON", help="URL gerada para a API do Player")
                 },
-                disabled=["json_link", "retorno"]
+                disabled=["json_link"]
             )
 
             edited_users = edited_df.to_dict(orient="records")
             for user in edited_users:
                 user.pop('json_link', None)
-                user.pop('retorno', None)
 
             new_data = {"multi_users": edited_users}
             organized_content = json.dumps(new_data, indent=2, ensure_ascii=False)

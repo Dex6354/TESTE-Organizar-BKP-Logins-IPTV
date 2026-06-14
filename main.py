@@ -29,12 +29,11 @@ if st.button("Buscar Dados via Scrape.do", type="primary"):
             
             headers = {}
             
-            # Correção do 406: Avisa o Scrape.do para usar nossos cabeçalhos limpos
             if corrigir_406:
                 scrape_url += "&customHeaders=true"
                 headers = {
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-                    "Accept": "*/*",  # Remove a rejeição do Nginx do IPTV
+                    "Accept": "*/*",
                     "Accept-Language": "*",
                     "Connection": "keep-alive"
                 }
@@ -44,24 +43,26 @@ if st.button("Buscar Dados via Scrape.do", type="primary"):
             if render_js:
                 scrape_url += "&render=true"
                 
-            # Executa a chamada
             resposta = requests.get(scrape_url, headers=headers, timeout=40)
             
             st.subheader("Status da Requisição")
             st.write(f"**Status Code:** {resposta.status_code}")
             
             st.subheader("Dados do JSON")
+            
+            # Remove tags HTML <pre> caso o servidor envie o JSON envelopado
+            texto_limpo = resposta.text
+            if "<pre>" in texto_limpo and "</pre>" in texto_limpo:
+                texto_limpo = texto_limpo.split("<pre>")[1].split("</pre>")[0]
+            
             try:
-                dados_json = resposta.json()
-                st.success("Sucesso! O JSON foi retornado direto.")
+                # Converte a string limpa diretamente em JSON objeto
+                dados_json = json.loads(texto_limpo)
+                st.success("Sucesso! JSON extraído e formatado.")
                 st.json(dados_json)
             except ValueError:
-                try:
-                    dados_json = json.loads(resposta.text)
-                    st.json(dados_json)
-                except ValueError:
-                    st.error("A resposta recebida não pôde ser convertida em JSON.")
-                    st.text_area("Conteúdo bruto retornado:", value=resposta.text, height=350)
+                st.error("Não foi possível converter o texto em JSON.")
+                st.text_area("Conteúdo bruto retornado:", value=resposta.text, height=350)
                     
         except Exception as e:
             st.error(f"Erro na conexão: {e}")

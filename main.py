@@ -4,56 +4,55 @@ import time
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
 
 st.set_page_config(page_title="Xtream API Debugger", layout="wide")
 
-st.title("🛠️ Python Streamlit API Debugger (Navegador Real)")
+st.title("🛠️ Streamlit Cloud API Debugger (Navegador Linux)")
 
 # URL completa fornecida
 url_padrao = "https://websmt.ca/player_api.php?username=concmus03&password=3a3b3c3d"
-
 url = st.text_input("URL da API para Debug:", value=url_padrao)
 
 if st.button("Buscar Dados / Enviar Requisição", type="primary"):
-    with st.spinner("Abrindo Chrome em segundo plano para burlar o bloqueio..."):
+    with st.spinner("Disparando Chromium headless no servidor do Streamlit..."):
         driver = None
         try:
-            # Configurações para o Chrome rodar oculto e parecer um usuário real
+            # Configurações obrigatórias para rodar Linux/Streamlit Cloud
             chrome_options = Options()
-            chrome_options.add_argument("--headless")  # Roda sem abrir a janela do navegador
+            chrome_options.add_argument("--headless=new")
             chrome_options.add_argument("--no-sandbox")
             chrome_options.add_argument("--disable-dev-shm-usage")
+            chrome_options.add_argument("--disable-gpu")
             chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-            chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-            chrome_options.add_experimental_option('useAutomationExtension', False)
             chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+            
+            # Caminhos binários padrão do ambiente Linux do Streamlit Cloud
+            chrome_options.binary_location = "/usr/bin/chromium"
+            servico = Service("/usr/bin/chromedriver")
 
-            # Inicializa o navegador real
-            servico = Service(ChromeDriverManager().install())
+            # Inicializa o navegador do servidor
             driver = webdriver.Chrome(service=servico, options=chrome_options)
             
-            # Acessa a URL inteira
+            # Acessa a API
             driver.get(url)
-            time.sleep(3)  # Aguarda 3 segundos para o Nginx/Cloudflare liberar o JSON
+            time.sleep(5)  # 5 segundos para o Cloudflare processar a entrada
             
-            # Captura o texto que aparece na tela (o JSON)
+            # Captura o texto gerado
             conteudo_bruto = driver.find_element("xpath", "//body").text
-            
-            # Fecha o navegador
             driver.quit()
             
-            # Exibe e processa o resultado
+            # Processa o JSON recebido
             st.subheader("Dados do JSON")
             try:
                 dados_json = json.loads(conteudo_bruto)
-                st.success("Sucesso! JSON retornado direto do navegador.")
+                st.success("Sucesso! O Cloudflare aceitou o navegador do Streamlit Cloud.")
                 st.json(dados_json)
             except ValueError:
-                st.error("O navegador abriu a página, mas o conteúdo não é um JSON válido.")
-                st.text_area("Conteúdo da página:", value=conteudo_bruto, height=300)
+                st.error("O navegador abriu, mas o servidor bloqueou o IP da Nuvem (AWS/Streamlit Cloud).")
+                st.text_area("Resposta do Servidor:", value=conteudo_bruto, height=300)
                 
         except Exception as e:
             if driver:
                 driver.quit()
-            st.error(f"Erro ao simular o navegador: {e}")
+            st.error(f"Erro ao executar o Chromium na Nuvem: {e}")
+            st.info("Confirme se os arquivos 'packages.txt' e 'requirements.txt' estão na raiz do seu GitHub.")

@@ -151,7 +151,7 @@ def test_single_user(user):
             
             payload = {
                 "url": last_tested_url if last_tested_url else api_url,
-                "formats": ["html"],
+                "formats": ["html", "markdown"],
                 "render_js": False,
                 "processing_mode": "sync",
                 "proxy": {
@@ -182,9 +182,9 @@ def test_single_user(user):
                                 status = "offline"
                             else:
                                 status = "active"
-                            retorno_code = "200"  # Sucesso via Geonode
+                            retorno_code = "200"
                         else:
-                            retorno_code = "404"  # Geonode acessou, mas não continha JSON
+                            retorno_code = "404"
                     else:
                         retorno_code = str(geo_resp.status_code)
                     break

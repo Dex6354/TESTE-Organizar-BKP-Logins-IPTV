@@ -6,8 +6,6 @@ st.set_page_config(page_title="Scrape.do Integration", layout="centered")
 st.title("Scrape.do Integration")
 st.write("Requisição utilizando Proxies Residenciais/Móveis e Geo-Targeting Brasil.")
 
----
-
 # Configurações da API
 API_URL = "http://api.scrape.do/"
 TOKEN = "3a23ea3810a04b16bccfac96a2c3b1af73c97a98ef5"

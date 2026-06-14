@@ -1,65 +1,56 @@
 import streamlit as st
+import requests
 import json
-import time
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
+from urllib.parse import quote
 
 st.set_page_config(page_title="Xtream API Debugger", layout="wide")
 
-st.title("🛠️ Streamlit Cloud API Debugger (Bypass IP AWS)")
+st.title("🛠️ Streamlit Cloud API Debugger (Scrape.do API)")
 
 # URL completa fornecida
 url_padrao = "https://websmt.ca/player_api.php?username=concmus03&password=3a3b3c3d"
 url = st.text_input("URL da API para Debug:", value=url_padrao)
 
-# Campo para injetar um Proxy e burlar o bloqueio de Datacenter da AWS
-proxy = st.text_input(
-    "Proxy IP:Porta (Opcional - Ex: 198.23.239.231:80)", 
-    help="Insira um proxy HTTP/SOCKS válido para camuflar o IP do Streamlit Cloud."
-)
+# Token fornecido inserido como padrão
+token = st.text_input("Scrape.do Token:", value="3a23ea3810a04b16bccfac96a2c3b1af73c97a98ef5", type="password")
 
-if st.button("Buscar Dados / Enviar Requisição", type="primary"):
-    with st.spinner("Disparando Chromium headless no servidor do Streamlit..."):
-        driver = None
+# Opção para ativar renderização de JavaScript se o Cloudflare for muito agressivo
+render_js = st.checkbox("Ativar Renderização de JavaScript (Render=True)", value=False)
+
+if st.button("Buscar Dados via Scrape.do", type="primary"):
+    with st.spinner("Solicitando dados através dos proxies do Scrape.do..."):
         try:
-            chrome_options = Options()
-            chrome_options.add_argument("--headless=new")
-            chrome_options.add_argument("--no-sandbox")
-            chrome_options.add_argument("--disable-dev-shm-usage")
-            chrome_options.add_argument("--disable-gpu")
-            chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-            chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+            # Codifica a URL de destino para o formato da API
+            url_codificada = quote(url)
             
-            # Injeta o proxy se ele for digitado pelo usuário
-            if proxy:
-                chrome_options.add_argument(f"--proxy-server={proxy}")
+            # Monta a URL de requisição do Scrape.do
+            scrape_url = f"https://api.scrape.do/?token={token}&url={url_codificada}"
             
-            # Caminhos padrão do Streamlit Cloud Linux
-            chrome_options.binary_location = "/usr/bin/chromium"
-            servico = Service("/usr/bin/chromedriver")
-
-            # Inicializa o navegador
-            driver = webdriver.Chrome(service=servico, options=chrome_options)
-            driver.get(url)
-            time.sleep(5)  # Tempo para resposta do servidor
+            if render_js:
+                scrape_url += "&render=true"
+                
+            # Faz a requisição HTTP simples (o Scrape.do resolve o IP e o Cloudflare)
+            resposta = requests.get(scrape_url, timeout=30)
             
-            conteudo_bruto = driver.find_element("xpath", "//body").text
-            driver.quit()
+            # Exibe o Status da Resposta do Scrape.do
+            st.subheader("Status da Requisição")
+            if resposta.status_code == 200:
+                st.success(f"Sucesso! Status Code: {resposta.status_code}")
+            else:
+                st.warning(f"Aviso! Gateway Status Code: {resposta.status_code}")
             
-            # Processa o JSON recebido
+            # Processa e exibe o JSON direto
             st.subheader("Dados do JSON")
             try:
-                dados_json = json.loads(conteudo_bruto)
-                st.success("Sucesso! O servidor aceitou a conexão e entregou o JSON.")
+                dados_json = resposta.json()
                 st.json(dados_json)
             except ValueError:
-                st.error("O servidor barrou a requisição (Retornou a página do Nginx).")
-                st.text_area("Resposta do Servidor:", value=conteudo_bruto, height=300)
-                if not proxy:
-                    st.info("💡 **O que fazer:** Como você está na nuvem, use sites de proxies gratuitos (como *sslproxies.org* ou *geonode.com*) e insira um IP:Porta válido no campo acima para contornar o bloqueio de ASN da AWS.")
-                
-        except Exception as e:
-            if driver:
-                driver.quit()
-            st.error(f"Erro ao executar o Chromium na Nuvem: {e}")
+                try:
+                    dados_json = json.loads(resposta.text)
+                    st.json(dados_json)
+                except ValueError:
+                    st.error("A resposta recebida ainda não é um JSON válido.")
+                    st.text_area("Resposta bruta recebida:", value=resposta.text, height=300)
+                    
+        except requests.exceptions.RequestException as e:
+            st.error(f"Erro ao conectar na API do Scrape.do: {e}")

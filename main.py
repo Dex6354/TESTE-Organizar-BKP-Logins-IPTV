@@ -24,7 +24,7 @@ payload = {
     "render_js": False,
     "processing_mode": "sync",
     "proxy": {
-        "country": "US",
+        "country": "BR",
         "type": "datacenter"
     },
     "headers": {

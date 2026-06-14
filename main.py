@@ -201,7 +201,7 @@ if uploaded_file is not None:
             st.success("Análise de status concluída com sucesso!")
             organized_users = sort_users(tested_users)
 
-            st.subheader("Lista de Usuários Organizada")
+            st.subheader("Lista Organizada")
 
             df_users = pd.DataFrame(organized_users)
             

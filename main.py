@@ -1,37 +1,36 @@
 import streamlit as st
 import requests
 
-st.set_page_config(page_title="Scrape.do Integration", layout="centered")
+st.set_page_config(page_title="Proxy Request Integration", layout="centered")
 
-st.title("Scrape.do Integration")
-st.write("Requisição utilizando Proxies e Geo-Targeting Brasil.")
+st.title("Proxy Request Integration")
+st.write("Requisição utilizando um Proxy Público Gratuito do Brasil.")
 
-# Configurações da API
-API_URL = "http://api.scrape.do/"
-TOKEN = "3a23ea3810a04b16bccfac96a2c3b1af73c97a98ef5"
+# URL final de destino
 TARGET_URL = "http://websmt.ca/player_api.php?username=concmus03&password=3a3b3c3d"
 
-# "super": "true" foi removido para reduzir o custo de 10 créditos para 1 por chamada
-params = {
-    "token": TOKEN,
-    "url": TARGET_URL,
-    "geoCode": "BR"
+# IP e Porta de um proxy público brasileiro de exemplo
+# Substitua por outro caso este fique offline
+PROXY_BR = "177.93.53.114:8080" 
+
+proxies = {
+    "http": f"http://{PROXY_BR}",
+    "https": f"http://{PROXY_BR}"
 }
 
 if st.button("Executar Requisição", type="primary"):
-    with st.spinner("Aguardando resposta do scrape.do..."):
+    with st.spinner("Aguardando resposta através do proxy brasileiro..."):
         try:
-            response = requests.get(API_URL, params=params)
+            # Realiza a requisição passando o dicionário de proxies e um timeout menor
+            response = requests.get(TARGET_URL, proxies=proxies, timeout=10)
             
-            # Exibe metadados úteis dos Headers do scrape.do
+            # Exibe metadados da requisição
             st.subheader("Informações da Requisição")
             col1, col2 = st.columns(2)
             with col1:
                 st.metric("Status Code", response.status_code)
-                st.metric("Créditos Restantes", response.headers.get("scrape.do-remaining-credits", "N/A"))
             with col2:
-                st.metric("Custo da Requisição", response.headers.get("scrape.do-request-cost", "N/A"))
-                st.metric("Status Inicial", response.headers.get("scrape.do-initial-status-code", "N/A"))
+                st.metric("Proxy Utilizado", PROXY_BR)
 
             # Exibe o conteúdo retornado
             st.subheader("Conteúdo da Resposta")
@@ -40,5 +39,9 @@ if st.button("Executar Requisição", type="primary"):
             except ValueError:
                 st.text(response.text)
 
+        except requests.exceptions.ProxyError:
+            st.error("Erro de Proxy: O IP configurado recusou a conexão ou está offline.")
+        except requests.exceptions.Timeout:
+            st.error("Erro de Timeout: O proxy demorou muito para responder.")
         except Exception as e:
-            st.error(f"Erro ao conectar com a API: {e}")
+            st.error(f"Erro ao conectar: {e}")

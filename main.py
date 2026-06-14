@@ -1,5 +1,11 @@
 import streamlit as st
-import requests
+import json
+
+try:
+    from curl_cffi import requests
+except ImportError:
+    st.error("Instale a biblioteca executando no terminal: pip install curl_cffi")
+    st.stop()
 
 st.set_page_config(page_title="Xtream API Debugger", layout="wide")
 
@@ -12,18 +18,23 @@ url_padrao = "https://websmt.ca/player_api.php?username=concmus03&password=3a3b3
 url = st.text_input("URL da API para Debug:", value=url_padrao)
 
 if st.button("Buscar Dados / Enviar Requisição", type="primary"):
-    with st.spinner("Conectando à API com cabeçalhos limpos..."):
+    with st.spinner("Simulando navegação real (Bypassing Nginx WAF)..."):
         try:
-            # Forçando o Nginx a aceitar a requisição sem tentar compactar ou validar o formato
+            # Cabeçalhos idênticos aos que o Chrome envia ao acessar a URL diretamente
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Accept": "*/*",
-                "Accept-Encoding": "identity",  # Desativa gzip/deflate do Python que gera o erro 406
-                "Connection": "keep-alive"
+                "Upgrade-Insecure-Requests": "1",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+                "Sec-Fetch-Site": "none",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-User": "?1",
+                "Sec-Fetch-Dest": "document",
+                "Accept-Encoding": "gzip, deflate, br",
+                "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
             }
             
-            # Faz a requisição HTTP GET
-            resposta = requests.get(url, headers=headers, timeout=15)
+            # Executa clonando o comportamento e TLS do Chrome
+            resposta = requests.get(url, headers=headers, impersonate="chrome", timeout=15)
             
             # Exibe o Status Code
             st.subheader("Status da Requisição")
@@ -37,9 +48,13 @@ if st.button("Buscar Dados / Enviar Requisição", type="primary"):
             try:
                 dados_json = resposta.json()
                 st.json(dados_json)
-            except ValueError:
-                st.error("A resposta recebida não é um JSON válido.")
-                st.text_area("Resposta bruta (Texto):", value=resposta.text, height=300)
+            except Exception:
+                try:
+                    dados_json = json.loads(resposta.text)
+                    st.json(dados_json)
+                except ValueError:
+                    st.error("A resposta recebida não é um JSON válido.")
+                    st.text_area("Resposta bruta (Texto):", value=resposta.text, height=300)
                 
-        except requests.exceptions.RequestException as e:
-            st.error(f"Erro de conexão ao tentar acessar a API: {e}")
+        except Exception as e:
+            st.error(f"Erro de conexão: {e}")

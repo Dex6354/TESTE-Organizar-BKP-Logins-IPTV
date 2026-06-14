@@ -6,17 +6,22 @@ st.set_page_config(page_title="Scrape.do Integration", layout="centered")
 st.title("Scrape.do Integration")
 st.write("Requisição utilizando Proxies Residenciais/Móveis e Geo-Targeting Brasil.")
 
-# Configurações da API
+# Campo dinâmico para o Token (deixe em branco para testar sem token)
+token_input = st.text_input("Token do Scrape.do (Deixe vazio para testar sem token)", type="password")
+
 API_URL = "http://api.scrape.do/"
-TOKEN = "3a23ea3810a04b16bccfac96a2c3b1af73c97a98ef5"
 TARGET_URL = "http://websmt.ca/player_api.php?username=concmus03&password=3a3b3c3d"
 
+# Parâmetros base da requisição
 params = {
-    "token": TOKEN,
     "url": TARGET_URL,
     "super": "true",
     "geoCode": "BR"
 }
+
+# Inclui o token nos parâmetros apenas se ele for digitado
+if token_input:
+    params["token"] = token_input
 
 if st.button("Executar Requisição", type="primary"):
     with st.spinner("Aguardando resposta do scrape.do..."):
@@ -33,7 +38,7 @@ if st.button("Executar Requisição", type="primary"):
                 st.metric("Custo da Requisição", response.headers.get("scrape.do-request-cost", "N/A"))
                 st.metric("Status Inicial", response.headers.get("scrape.do-initial-status-code", "N/A"))
 
-            # Exibe o conteúdo retornado
+            # Exibe o conteúdo retornado (erro ou sucesso)
             st.subheader("Conteúdo da Resposta")
             try:
                 st.json(response.json())

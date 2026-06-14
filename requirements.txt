@@ -5,3 +5,4 @@ urllib3
 curl_cffi
 httpx[http2]
 httpx
+cloudscraper

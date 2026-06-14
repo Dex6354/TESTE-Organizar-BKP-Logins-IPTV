@@ -11,7 +11,7 @@ TARGET_URL = "http://websmt.ca/player_api.php?username=concmus03&password=3a3b3c
 
 # IP e Porta de um proxy público brasileiro de exemplo
 # Substitua por outro caso este fique offline
-PROXY_BR = "168.227.158.65:4145" 
+PROXY_BR = "200.229.192.220:443" 
 
 proxies = {
     "http": f"http://{PROXY_BR}",

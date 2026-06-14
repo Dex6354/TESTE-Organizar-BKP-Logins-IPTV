@@ -170,7 +170,7 @@ def test_single_user(user):
                         }
                     }
 
-                    max_retries = 3
+                    max_retries = 1
                     delay = 2
                     for attempt in range(max_retries):
                         try:

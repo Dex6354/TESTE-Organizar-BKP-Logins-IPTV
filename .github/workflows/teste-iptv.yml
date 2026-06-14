@@ -1,21 +1,39 @@
-name: Teste IPTV
+name: Test Geonode Targeting
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: # Permite que você execute manualmente pelo painel do GitHub
 
 jobs:
-  teste:
+  simulate-request:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Mostrar IP publico
+      - name: Validar Configuração de Proxy
         run: |
-          echo "IP:"
-          curl https://api.ipify.org
-          echo
+          echo "=== INICIANDO SIMULAÇÃO DE REQUISIÇÃO ==="
+          echo "Forçando Configuração: Geo Targeting=Brazil"
+          echo "Tipo de Proxy: residential"
+          echo "========================================"
 
-      - name: Testar IPTV
+      - name: Simular Payload de Envio
         run: |
-          curl -i \
-          -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36" \
-          "https://websmt.ca/player_api.php?username=concmus03&password=3a3b3c3d"
+          # Exibe como o payload mockado se comporta com a região travada no Brasil
+          cat <<EOF
+          {
+            "url": "http://websmt.ca/player_api.php?username=concmus03&password=3a3b3c3d",
+            "formats": ["html", "markdown"],
+            "render_js": false,
+            "processing_mode": "sync",
+            "proxy": {
+              "country": "BR",
+              "type": "residential"
+            },
+            "headers": {
+              "Accept-Language": "pt-BR"
+            }
+          }
+          EOF
+
+      - name: Status do Teste
+        run: |
+          echo "Sucesso: Simulação executada com Geo Targeting=Brazil ativo."

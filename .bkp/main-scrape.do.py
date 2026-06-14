@@ -1,0 +1,44 @@
+import streamlit as st
+import requests
+
+st.set_page_config(page_title="Scrape.do Integration", layout="centered")
+
+st.title("Scrape.do Integration")
+st.write("Requisição utilizando Proxies e Geo-Targeting Brasil.")
+
+# Configurações da API
+API_URL = "http://api.scrape.do/"
+TOKEN = "3a23ea3810a04b16bccfac96a2c3b1af73c97a98ef5"
+TARGET_URL = "http://websmt.ca/player_api.php?username=concmus03&password=3a3b3c3d"
+
+# "super": "true" foi removido para reduzir o custo de 10 créditos para 1 por chamada
+params = {
+    "token": TOKEN,
+    "url": TARGET_URL,
+    "geoCode": "BR"
+}
+
+if st.button("Executar Requisição", type="primary"):
+    with st.spinner("Aguardando resposta do scrape.do..."):
+        try:
+            response = requests.get(API_URL, params=params)
+            
+            # Exibe metadados úteis dos Headers do scrape.do
+            st.subheader("Informações da Requisição")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Status Code", response.status_code)
+                st.metric("Créditos Restantes", response.headers.get("scrape.do-remaining-credits", "N/A"))
+            with col2:
+                st.metric("Custo da Requisição", response.headers.get("scrape.do-request-cost", "N/A"))
+                st.metric("Status Inicial", response.headers.get("scrape.do-initial-status-code", "N/A"))
+
+            # Exibe o conteúdo retornado
+            st.subheader("Conteúdo da Resposta")
+            try:
+                st.json(response.json())
+            except ValueError:
+                st.text(response.text)
+
+        except Exception as e:
+            st.error(f"Erro ao conectar com a API: {e}")

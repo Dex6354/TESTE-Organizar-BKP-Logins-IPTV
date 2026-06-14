@@ -14,8 +14,14 @@ url = st.text_input("URL da API para Debug:", value=url_padrao)
 if st.button("Buscar Dados / Enviar Requisição", type="primary"):
     with st.spinner("Conectando à API..."):
         try:
-            # Faz a requisição HTTP GET
-            resposta = requests.get(url, timeout=15)
+            # Cabeçalhos para simular um navegador real e evitar o erro 403
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "application/json, text/plain, */*"
+            }
+            
+            # Faz a requisição HTTP GET com os headers
+            resposta = requests.get(url, headers=headers, timeout=15)
             
             # Exibe o Status Code
             st.subheader("Status da Requisição")

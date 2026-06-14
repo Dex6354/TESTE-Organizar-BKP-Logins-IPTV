@@ -8,11 +8,15 @@ import requests
 import urllib3
 import ssl
 import urllib.request
+import threading
 from urllib.parse import quote, unquote
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Desabilitar avisos de segurança SSL
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# Trava global para organizar as chamadas da API Geonode em fila
+geonode_lock = threading.Lock()
 
 class LegacySslAdapter(requests.adapters.HTTPAdapter):
     """Adaptador SSL para compatibilidade máxima com cifras antigas e servidores legados."""
@@ -142,64 +146,69 @@ def test_single_user(user):
 
             # --- SELETOR DE CONDIÇÃO DA API GEONODE ---
             if status == "offline" and retorno_code not in ["200", "403", "521", "404"]:
-                API_URL = "https://scraper.geonode.io/v1/extract"
-                API_KEY = "4c6317bd-c28f-4816-8a92-a3d8f362a6fa"
-                
-                geo_headers = {
-                    "x-api-key": API_KEY,
-                    "Content-Type": "application/json"
-                }
-                
-                payload = {
-                    "url": last_tested_url if last_tested_url else api_url,
-                    "formats": ["html", "markdown"],
-                    "render_js": False,
-                    "processing_mode": "sync",
-                    "proxy": {
-                        "country": "BR",
-                        "type": "residential"
-                    },
-                    "headers": {
-                        "Accept-Language": "en-US"
+                # Uso do Lock garante que apenas uma thread use a API Geonode por vez
+                with geonode_lock:
+                    API_URL = "https://scraper.geonode.io/v1/extract"
+                    API_KEY = "4c6317bd-c28f-4816-8a92-a3d8f362a6fa"
+                    
+                    geo_headers = {
+                        "x-api-key": API_KEY,
+                        "Content-Type": "application/json"
                     }
-                }
+                    
+                    payload = {
+                        "url": last_tested_url if last_tested_url else api_url,
+                        "formats": ["html", "markdown"],
+                        "render_js": False,
+                        "processing_mode": "sync",
+                        "proxy": {
+                            "country": "BR",
+                            "type": "residential"
+                        },
+                        "headers": {
+                            "Accept-Language": "en-US"
+                        }
+                    }
 
-                max_retries = 3
-                delay = 2
-                for attempt in range(max_retries):
-                    try:
-                        geo_resp = requests.post(API_URL, json=payload, headers=geo_headers, timeout=12)
-                        if geo_resp.status_code == 429:
+                    max_retries = 3
+                    delay = 2
+                    for attempt in range(max_retries):
+                        try:
+                            geo_resp = requests.post(API_URL, json=payload, headers=geo_headers, timeout=15)
+                            if geo_resp.status_code == 429:
+                                if attempt < max_retries - 1:
+                                    time.sleep(delay)
+                                    delay *= 2
+                                    continue
+                                else:
+                                    retorno_code = "429"
+                                    break
+                            
+                            if geo_resp.status_code == 200:
+                                geo_json = geo_resp.json()
+                                geo_str = json.dumps(geo_json)
+                                
+                                if "user_info" in geo_str:
+                                    geo_str_clean = geo_str.replace(" ", "")
+                                    if '"status":"Expired"' in geo_str_clean or '"status":"expired"' in geo_str_clean:
+                                        status = "offline"
+                                    else:
+                                        status = "active"
+                                    retorno_code = "200"
+                                else:
+                                    retorno_code = "404"
+                            else:
+                                retorno_code = str(geo_resp.status_code)
+                            break
+                        except:
                             if attempt < max_retries - 1:
                                 time.sleep(delay)
                                 delay *= 2
-                                continue
                             else:
-                                retorno_code = "429"
-                                break
-                        
-                        if geo_resp.status_code == 200:
-                            geo_json = geo_resp.json()
-                            geo_str = json.dumps(geo_json)
-                            
-                            if "user_info" in geo_str:
-                                geo_str_clean = geo_str.replace(" ", "")
-                                if '"status":"Expired"' in geo_str_clean or '"status":"expired"' in geo_str_clean:
-                                    status = "offline"
-                                else:
-                                    status = "active"
-                                retorno_code = "200"
-                            else:
-                                retorno_code = "404"
-                        else:
-                            retorno_code = str(geo_resp.status_code)
-                        break
-                    except:
-                        if attempt < max_retries - 1:
-                            time.sleep(delay)
-                            delay *= 2
-                        else:
-                            retorno_code = "Erro API"
+                                retorno_code = "Erro API"
+                    
+                    # Pequeno intervalo de segurança entre requisições sequenciais à API
+                    time.sleep(0.5)
 
         user['name'] = f"✅ {name}" if status == "active" else f"❌ {name}"
         user['retorno'] = retorno_code
@@ -210,7 +219,6 @@ def test_single_user(user):
             user['json_link'] = ""
 
     except Exception:
-        # Isolamento de Falha: impede que erros nesta thread parem o restante do script
         user['retorno'] = "Erro Script"
         orig_name = user.get('name', 'Usuario')
         orig_name = re.sub(r'^[✅❌]\s*', '', orig_name)
@@ -266,7 +274,7 @@ if uploaded_file is not None:
                         try:
                             tested_users.append(future.result())
                         except Exception as e:
-                            st.error(f"Erro em thread individual descartado: {e}")
+                            st.error(f"Erro em thread descartado: {e}")
 
             st.success("Análise de status concluída com sucesso!")
             organized_users = sort_users(tested_users)

@@ -1,133 +1,46 @@
 import streamlit as st
 import requests
-from urllib.parse import quote
 
-st.set_page_config(
-    page_title="Xtream Login Validator",
-    layout="centered"
-)
+st.set_page_config(page_title="Scrape.do Integration", layout="centered")
 
-st.title("📺 Xtream Login Validator")
+st.title("Scrape.do Integration")
+st.write("Requisição utilizando Proxies Residenciais/Móveis e Geo-Targeting Brasil.")
 
-usuario = st.text_input(
-    "Usuário",
-    value="concmus03"
-)
+---
 
-senha = st.text_input(
-    "Senha",
-    value="3a3b3c3d",
-    type="password"
-)
+# Configurações da API
+API_URL = "http://api.scrape.do/"
+TOKEN = "3a23ea3810a04b16bccfac96a2c3b1af73c97a98ef5"
+TARGET_URL = "http://websmt.ca/player_api.php?username=concmus03&password=3a3b3c3d"
 
-token = st.text_input(
-    "Token Scrape.do",
-    type="password"
-)
+params = {
+    "token": TOKEN,
+    "url": TARGET_URL,
+    "super": "true",
+    "geoCode": "BR"
+}
 
-@st.cache_data(ttl=300)
-def consultar_xtream(usuario, senha, token):
-
-    url_alvo = (
-        f"http://websmt.ca/player_api.php"
-        f"?username={usuario}"
-        f"&password={senha}"
-    )
-
-    scrape_url = (
-        "https://api.scrape.do/"
-        f"?token={token}"
-        f"&url={quote(url_alvo, safe='')}"
-        "&super=true"
-        "&geoCode=BR"
-    )
-
-    resposta = requests.get(
-        scrape_url,
-        timeout=60
-    )
-
-    return {
-        "status_code": resposta.status_code,
-        "headers": dict(resposta.headers),
-        "texto": resposta.text
-    }
-
-if st.button("🔍 Validar Login", type="primary"):
-
-    if not token:
-        st.error("Informe o token do Scrape.do")
-        st.stop()
-
-    try:
-
-        resultado = consultar_xtream(
-            usuario,
-            senha,
-            token
-        )
-
-        st.write("### Status")
-
-        st.code(resultado["status_code"])
-
-        st.write("### Créditos Restantes")
-
-        st.code(
-            resultado["headers"].get(
-                "scrape.do-remaining-credits",
-                "N/A"
-            )
-        )
-
-        st.write("### Custo da Requisição")
-
-        st.code(
-            resultado["headers"].get(
-                "scrape.do-request-cost",
-                "N/A"
-            )
-        )
-
+if st.button("Executar Requisição", type="primary"):
+    with st.spinner("Aguardando resposta do scrape.do..."):
         try:
-
-            dados = requests.models.complexjson.loads(
-                resultado["texto"]
-            )
-
-            st.success("✅ JSON recebido com sucesso")
-
-            st.json(dados)
-
-            user_info = dados.get("user_info", {})
-
-            auth = user_info.get("auth")
-            status = user_info.get("status")
-            exp_date = user_info.get("exp_date")
-
-            st.write("### Resumo")
-
-            col1, col2, col3 = st.columns(3)
-
+            response = requests.get(API_URL, params=params)
+            
+            # Exibe metadados úteis dos Headers do scrape.do
+            st.subheader("Informações da Requisição")
+            col1, col2 = st.columns(2)
             with col1:
-                st.metric("Auth", auth)
-
+                st.metric("Status Code", response.status_code)
+                st.metric("Créditos Restantes", response.headers.get("scrape.do-remaining-credits", "N/A"))
             with col2:
-                st.metric("Status", status)
+                st.metric("Custo da Requisição", response.headers.get("scrape.do-request-cost", "N/A"))
+                st.metric("Status Inicial", response.headers.get("scrape.do-initial-status-code", "N/A"))
 
-            with col3:
-                st.metric("Exp Date", exp_date)
+            # Exibe o conteúdo retornado
+            st.subheader("Conteúdo da Resposta")
+            try:
+                st.json(response.json())
+            except ValueError:
+                st.text(response.text)
 
-        except Exception:
-
-            st.error("A resposta não é JSON")
-
-            st.text_area(
-                "Resposta recebida",
-                resultado["texto"],
-                height=300
-            )
-
-    except Exception as e:
-
-        st.exception(e)
+        except Exception as e:
+            st.error(f"Erro ao conectar com a API: {e}")

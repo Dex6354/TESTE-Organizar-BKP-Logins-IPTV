@@ -1,39 +1,34 @@
-name: Test Geonode Targeting
+name: Geonode Real Request Test
 
 on:
-  workflow_dispatch: # Permite que você execute manualmente pelo painel do GitHub
+  workflow_dispatch: # Execução manual pelo painel do GitHub
 
 jobs:
-  simulate-request:
+  execute-request:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Validar Configuração de Proxy
+      - name: Executar Requisição Geonode
         run: |
-          echo "=== INICIANDO SIMULAÇÃO DE REQUISIÇÃO ==="
-          echo "Forçando Configuração: Geo Targeting=Brazil"
-          echo "Tipo de Proxy: residential"
-          echo "========================================"
+          echo "Iniciando requisição real com Geo-Targeting Brasil (Residencial)..."
+          
+          RESPONSE=$(curl -s -X POST "https://scraper.geonode.io/v1/extract" \
+            -H "x-api-key: 4c6317bd-c28f-4816-8a92-a3d8f362a6fa" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "url": "http://websmt.ca/player_api.php?username=concmus03&password=3a3b3c3d",
+              "formats": ["html", "markdown"],
+              "render_js": false,
+              "processing_mode": "sync",
+              "proxy": {
+                "country": "BR",
+                "type": "residential"
+              },
+              "headers": {
+                "Accept-Language": "pt-BR"
+              }
+            }')
 
-      - name: Simular Payload de Envio
-        run: |
-          # Exibe como o payload mockado se comporta com a região travada no Brasil
-          cat <<EOF
-          {
-            "url": "http://websmt.ca/player_api.php?username=concmus03&password=3a3b3c3d",
-            "formats": ["html", "markdown"],
-            "render_js": false,
-            "processing_mode": "sync",
-            "proxy": {
-              "country": "BR",
-              "type": "residential"
-            },
-            "headers": {
-              "Accept-Language": "pt-BR"
-            }
-          }
-          EOF
-
-      - name: Status do Teste
-        run: |
-          echo "Sucesso: Simulação executada com Geo Targeting=Brazil ativo."
+          echo "================ CONTEÚDO DO JSON ================"
+          echo "$RESPONSE" | jq .
+          echo "=================================================="

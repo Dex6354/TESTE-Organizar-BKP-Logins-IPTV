@@ -140,7 +140,8 @@ def test_single_user(user):
             retorno_code = "404"
 
         # --- SELETOR DE CONDIÇÃO DA API GEONODE ---
-        if status == "offline" and retorno_code in ["429", "406"]:
+        # Não gasta API se o retorno local for explicitamente um dos códigos abaixo
+        if status == "offline" and retorno_code not in ["200", "403", "521", "404"]:
             API_URL = "https://scraper.geonode.io/v1/extract"
             API_KEY = "4c6317bd-c28f-4816-8a92-a3d8f362a6fa"
             
@@ -175,10 +176,12 @@ def test_single_user(user):
                     
                     if geo_resp.status_code == 200:
                         geo_json = geo_resp.json()
-                        geo_content = geo_json.get("html", "")
+                        geo_str = json.dumps(geo_json)
                         
-                        if "user_info" in geo_content:
-                            if '"status":"Expired"' in geo_content.replace(" ", "") or '"status":"expired"' in geo_content.replace(" ", ""):
+                        # Garante a varredura completa do corpo retornado pelo Geonode
+                        if "user_info" in geo_str:
+                            geo_str_clean = geo_str.replace(" ", "")
+                            if '"status":"Expired"' in geo_str_clean or '"status":"expired"' in geo_str_clean:
                                 status = "offline"
                             else:
                                 status = "active"

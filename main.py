@@ -2,21 +2,16 @@ import streamlit as st
 import json
 import re
 import os
-import time
 import pandas as pd
 import requests
 import urllib3
 import ssl
 import urllib.request
-import threading
 from urllib.parse import quote, unquote
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Desabilitar avisos de segurança SSL
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-# Trava global para organizar as chamadas da API Geonode em fila
-geonode_lock = threading.Lock()
 
 class LegacySslAdapter(requests.adapters.HTTPAdapter):
     """Adaptador SSL para compatibilidade máxima com cifras antigas e servidores legados."""
@@ -25,7 +20,7 @@ class LegacySslAdapter(requests.adapters.HTTPAdapter):
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
         try:
-            ctx.set_ciphers('ALL:@SECLEVEL=0')
+            ctx.set_ciphers('ALL:@SECLEVEL=0')  # Permite qualquer cifra e reduz nível de segurança ao mínimo
         except:
             pass
         try:
@@ -36,76 +31,102 @@ class LegacySslAdapter(requests.adapters.HTTPAdapter):
         return super(LegacySslAdapter, self).init_poolmanager(*args, **kwargs)
 
 def test_single_user(user):
-    """Testa o status do usuário com fallbacks locais e uso condicional da API Geonode."""
-    try:
-        name = user.get('name', '')
-        url = user.get('url', '')
+    """Testa se o usuário está ativo ou offline via Xtream API com múltiplos fallbacks de agentes e bibliotecas."""
+    name = user.get('name', '')
+    url = user.get('url', '')
 
-        # Remove emoji de status antigo
-        name = re.sub(r'^[✅❌]\s*', '', name)
+    # Remove emoji de status antigo (✅ ou ❌) se já existir no início do nome
+    name = re.sub(r'^[✅❌]\s*', '', name)
 
-        username = user.get('username') or user.get('user', '')
-        if not username:
-            user_match = re.search(r"username=([^&]+)", url, re.IGNORECASE)
-            username = unquote(user_match.group(1)) if user_match else ""
-        else:
-            username = unquote(str(username))
+    # 1. Tenta obter usuário das chaves dedicadas ou extrai da URL se não existirem
+    username = user.get('username') or user.get('user', '')
+    if not username:
+        user_match = re.search(r"username=([^&]+)", url, re.IGNORECASE)
+        username = unquote(user_match.group(1)) if user_match else ""
+    else:
+        username = unquote(str(username))
 
-        password = user.get('password') or user.get('pass', '')
-        if not password:
-            pass_match = re.search(r"password=([^&]+)", url, re.IGNORECASE)
-            password = unquote(pass_match.group(1)) if pass_match else ""
-        else:
-            password = unquote(str(password))
+    # 2. Tenta obter a senha das chaves dedicadas ou extrai da URL se não existirem
+    password = user.get('password') or user.get('pass', '')
+    if not password:
+        pass_match = re.search(r"password=([^&]+)", url, re.IGNORECASE)
+        password = unquote(pass_match.group(1)) if pass_match else ""
+    else:
+        password = unquote(str(password))
 
-        base_match = re.search(r"(https?://[^/]+)", url)
-        base = base_match.group(1) if base_match else url
-        if base:
-            base = base.rstrip('/')
-            if not base.startswith(('http://', 'https://')):
-                base = 'http://' + base
+    # 3. Identifica e higieniza a URL base do servidor
+    base_match = re.search(r"(https?://[^/]+)", url)
+    base = base_match.group(1) if base_match else url
+    if base:
+        base = base.rstrip('/')
+        if not base.startswith(('http://', 'https://')):
+            base = 'http://' + base
 
-        status = "offline"
-        retorno_code = "Erro/Timeout"
+    status = "offline"
+    retorno_code = "Erro/Timeout"
+
+    # Executa o teste caso possua todos os dados necessários
+    if username and password and base:
+        api_url = f"{base}/player_api.php?username={quote(username)}&password={quote(password)}"
+        
+        # Lista de variações de protocolos para testar alternadamente
+        urls_to_test = [api_url]
+        if api_url.startswith("https://"):
+            urls_to_test.append(api_url.replace("https://", "http://", 1))
+        elif api_url.startswith("http://"):
+            urls_to_test.append(api_url.replace("http://", "https://", 1))
+
+        # Lista de User-Agents: Navegador Padrão vs Players de Mídia (frequentemente em Whitelist de WAFs)
+        user_agents = [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "VLC/3.0.18 LibVLC/3.0.18",
+            "IPTVSmartersPlayer"
+        ]
+
         found_active = False
-        last_tested_url = ""
 
-        if username and password and base:
-            api_url = f"{base}/player_api.php?username={quote(username)}&password={quote(password)}"
-            urls_to_test = [api_url]
-            if api_url.startswith("https://"):
-                urls_to_test.append(api_url.replace("https://", "http://", 1))
-            elif api_url.startswith("http://"):
-                urls_to_test.append(api_url.replace("http://", "https://", 1))
+        for target_url in urls_to_test:
+            if found_active:
+                break
 
-            user_agents = [
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "VLC/3.0.18 LibVLC/3.0.18",
-                "IPTVSmartersPlayer"
-            ]
+            for ua in user_agents:
+                headers = {
+                    "User-Agent": ua,
+                    "Accept": "*/*",
+                    "Connection": "keep-alive"
+                }
 
-            # --- TESTE NATIVO LOCAL ---
-            for target_url in urls_to_test:
-                if found_active:
-                    break
-                last_tested_url = target_url
+                # MÉTODO 1: Requests com tratamento permissivo de resposta e SSL
+                try:
+                    with requests.Session() as session:
+                        session.mount("https://", LegacySslAdapter())
+                        resp = session.get(target_url, headers=headers, verify=False, timeout=10)
+                        retorno_code = str(resp.status_code)
+                        resp.encoding = resp.apparent_encoding
+                        content = resp.text
 
-                for ua in user_agents:
-                    headers = {
-                        "User-Agent": ua,
-                        "Accept": "*/*",
-                        "Connection": "keep-alive"
-                    }
+                        if "user_info" in content:
+                            if '"status":"Expired"' in content.replace(" ", "") or '"status":"expired"' in content.replace(" ", ""):
+                                status = "offline"
+                            else:
+                                status = "active"
+                            found_active = True
+                            break
+                except:
+                    pass
 
-                    # MÉTODO 1: Requests
+                # MÉTODO 2: Fallback para urllib nativo
+                if not found_active:
                     try:
-                        with requests.Session() as session:
-                            session.mount("https://", LegacySslAdapter())
-                            resp = session.get(target_url, headers=headers, verify=False, timeout=8)
-                            retorno_code = str(resp.status_code)
-                            resp.encoding = resp.apparent_encoding
-                            content = resp.text
-
+                        ssl_ctx = ssl._create_unverified_context()
+                        try:
+                            ssl_ctx.set_ciphers('ALL:@SECLEVEL=0')
+                        except:
+                            pass
+                        req = urllib.request.Request(target_url, headers=headers)
+                        with urllib.request.urlopen(req, context=ssl_ctx, timeout=10) as response:
+                            retorno_code = str(response.getcode())
+                            content = response.read().decode('utf-8', errors='ignore')
                             if "user_info" in content:
                                 if '"status":"Expired"' in content.replace(" ", "") or '"status":"expired"' in content.replace(" ", ""):
                                     status = "offline"
@@ -113,125 +134,28 @@ def test_single_user(user):
                                     status = "active"
                                 found_active = True
                                 break
+                    except urllib.error.HTTPError as e:
+                        retorno_code = str(e.code)
                     except:
                         pass
 
-                    # MÉTODO 2: Urllib Fallback
-                    if not found_active:
-                        try:
-                            ssl_ctx = ssl._create_unverified_context()
-                            try:
-                                ssl_ctx.set_ciphers('ALL:@SECLEVEL=0')
-                            except:
-                                pass
-                            req = urllib.request.Request(target_url, headers=headers)
-                            with urllib.request.urlopen(req, context=ssl_ctx, timeout=8) as response:
-                                retorno_code = str(response.getcode())
-                                content = response.read().decode('utf-8', errors='ignore')
-                                if "user_info" in content:
-                                    if '"status":"Expired"' in content.replace(" ", "") or '"status":"expired"' in content.replace(" ", ""):
-                                        status = "offline"
-                                    else:
-                                        status = "active"
-                                    found_active = True
-                                    break
-                        except urllib.error.HTTPError as e:
-                            retorno_code = str(e.code)
-                        except:
-                            pass
-
-            # Validação estrita para falso positivo (Retornou 200 mas não possui JSON válido)
-            if retorno_code == "200" and not found_active:
-                retorno_code = "404"
-
-            # --- SELETOR DE CONDIÇÃO DA API GEONODE ---
-            if status == "offline" and retorno_code not in ["200", "403", "521", "404"]:
-                # Uso do Lock garante que apenas uma thread use a API Geonode por vez
-                with geonode_lock:
-                    API_URL = "https://scraper.geonode.io/v1/extract"
-                    API_KEY = "4c6317bd-c28f-4816-8a92-a3d8f362a6fa"
-                    
-                    geo_headers = {
-                        "x-api-key": API_KEY,
-                        "Content-Type": "application/json"
-                    }
-                    
-                    payload = {
-                        "url": last_tested_url if last_tested_url else api_url,
-                        "formats": ["html", "markdown"],
-                        "render_js": False,
-                        "processing_mode": "sync",
-                        "proxy": {
-                            "country": "BR",
-                            "type": "residential"
-                        },
-                        "headers": {
-                            "Accept-Language": "en-US"
-                        }
-                    }
-
-                    max_retries = 1
-                    delay = 2
-                    for attempt in range(max_retries):
-                        try:
-                            geo_resp = requests.post(API_URL, json=payload, headers=geo_headers, timeout=15)
-                            if geo_resp.status_code == 429:
-                                if attempt < max_retries - 1:
-                                    time.sleep(delay)
-                                    delay *= 2
-                                    continue
-                                else:
-                                    retorno_code = "429"
-                                    break
-                            
-                            if geo_resp.status_code == 200:
-                                geo_json = geo_resp.json()
-                                geo_str = json.dumps(geo_json)
-                                
-                                if "user_info" in geo_str:
-                                    geo_str_clean = geo_str.replace(" ", "")
-                                    if '"status":"Expired"' in geo_str_clean or '"status":"expired"' in geo_str_clean:
-                                        status = "offline"
-                                    else:
-                                        status = "active"
-                                    retorno_code = "200"
-                                else:
-                                    retorno_code = "404"
-                            else:
-                                retorno_code = str(geo_resp.status_code)
-                            break
-                        except:
-                            if attempt < max_retries - 1:
-                                time.sleep(delay)
-                                delay *= 2
-                            else:
-                                retorno_code = "Erro API"
-                    
-                    # Pequeno intervalo de segurança entre requisições sequenciais à API
-                    time.sleep(0.5)
-
-        user['name'] = f"✅ {name}" if status == "active" else f"❌ {name}"
-        user['retorno'] = retorno_code
+    # Define o novo emoji com base no status atualizado
+    user['name'] = f"✅ {name}" if status == "active" else f"❌ {name}"
+    user['retorno'] = retorno_code
+    
+    # Monta a URL JSON final para a tabela clicável
+    if username and password and base:
+        user['json_link'] = f"{base}/player_api.php?username={quote(username)}&password={quote(password)}"
+    else:
+        user['json_link'] = ""
         
-        if username and password and base:
-            user['json_link'] = f"{base}/player_api.php?username={quote(username)}&password={quote(password)}"
-        else:
-            user['json_link'] = ""
-
-    except Exception:
-        user['retorno'] = "Erro Script"
-        orig_name = user.get('name', 'Usuario')
-        orig_name = re.sub(r'^[✅❌]\s*', '', orig_name)
-        user['name'] = f"❌ {orig_name}"
-        if 'json_link' not in user:
-            user['json_link'] = ""
-            
     return user
 
 def sort_users(users_list):
     """Organiza a lista de usuários com base na hierarquia estipulada."""
     def get_sort_key(user):
         name = user.get('name', '')
+        
         if '✅' in name: r1 = 0
         elif '❌' in name: r1 = 1
         else: r1 = 2
@@ -248,7 +172,8 @@ def sort_users(users_list):
         elif '📱' in name: r4 = 1
         else: r4 = 2
             
-        return (r1, r2, r3, r4, name.lower())
+        r5 = name.lower()
+        return (r1, r2, r3, r4, r5)
 
     return sorted(users_list, key=get_sort_key)
 
@@ -271,10 +196,7 @@ if uploaded_file is not None:
                 with ThreadPoolExecutor(max_workers=10) as executor:
                     futures = [executor.submit(test_single_user, user) for user in original_users]
                     for future in as_completed(futures):
-                        try:
-                            tested_users.append(future.result())
-                        except Exception as e:
-                            st.error(f"Erro em thread descartado: {e}")
+                        tested_users.append(future.result())
 
             st.success("Análise de status concluída com sucesso!")
             organized_users = sort_users(tested_users)

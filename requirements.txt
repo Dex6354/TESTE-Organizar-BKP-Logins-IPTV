@@ -6,3 +6,5 @@ curl_cffi
 httpx[http2]
 httpx
 cloudscraper
+selenium
+webdriver-manager

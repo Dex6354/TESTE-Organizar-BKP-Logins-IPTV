@@ -1,49 +1,227 @@
 import streamlit as st
 import json
+import time
 
-# Usamos curl_cffi em vez do requests padrão para clonar o TLS do Chrome
 try:
-    from curl_cffi import requests
+    from curl_cffi import requests as cffi_requests
+    CURL_CFFI_AVAILABLE = True
 except ImportError:
-    st.error("Instale a biblioteca necessária executando: pip install curl_cffi")
-    st.stop()
+    CURL_CFFI_AVAILABLE = False
 
-st.set_page_config(page_title="Xtream API Debugger", layout="wide")
+import requests as std_requests
 
+st.set_page_config(page_title="🛠️ API Debugger", layout="wide")
 st.title("🛠️ Python Streamlit API Debugger")
 
-# URL fornecida pelo usuário
-url_padrao = "https://websmt.ca/player_api.php?username=concmus03&password=3a3b3c3d"
+url = st.text_input(
+    "URL da API para Debug:",
+    value="https://websmt.ca/player_api.php?username=concmus03&password=3a3b3c3d",
+)
 
-# Input para a URL
-url = st.text_input("URL da API para Debug:", value=url_padrao)
+with st.expander("⚙️ Opções Avançadas"):
+    col1, col2 = st.columns(2)
+    with col1:
+        timeout = st.number_input("Timeout (segundos)", min_value=1, max_value=60, value=15)
+        verify_ssl = st.checkbox("Verificar SSL", value=False)
+        # PADRÃO AGORA É FALSE — mantém no HTTPS sem seguir redirect para HTTP
+        allow_redirects = st.checkbox("Seguir redirecionamentos", value=False,
+            help="Desativado por padrão: evita que o servidor redirecione HTTPS→HTTP incorretamente.")
+    with col2:
+        method = st.selectbox("Método HTTP", ["GET", "POST", "PUT", "DELETE"])
+        if CURL_CFFI_AVAILABLE:
+            engine = st.selectbox(
+                "Engine HTTP",
+                ["curl_cffi (Chrome120)", "curl_cffi (Chrome110)", "curl_cffi (Firefox110)", "requests (padrão)"],
+            )
+        else:
+            engine = "requests (padrão)"
+            st.warning("💡 Instale `curl_cffi` para bypass de anti-bot:\n```\npip install curl_cffi\n```")
 
-if st.button("Buscar Dados / Enviar Requisição", type="primary"):
-    with st.spinner("Conectando à API mascarando o TLS..."):
+    st.markdown("**Headers Customizados**")
+    user_agent = st.text_input(
+        "User-Agent",
+        value="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    )
+    accept = st.text_input("Accept", value="*/*")
+    extra_headers_raw = st.text_area("Headers extras (formato JSON)", value='{}', height=80)
+
+    body_raw = ""
+    if method in ["POST", "PUT"]:
+        body_raw = st.text_area("Body (JSON)", value="{}", height=100)
+
+if st.button("🚀 Executar Requisição", use_container_width=True):
+
+    try:
+        extra = json.loads(extra_headers_raw)
+    except json.JSONDecodeError:
+        extra = {}
+        st.warning("⚠️ Headers extras inválidos — ignorados.")
+
+    body = None
+    if method in ["POST", "PUT"]:
         try:
-            # O parâmetro impersonate="chrome" faz a mágica de fingir ser o Chrome real no nível de rede
-            resposta = requests.get(url, impersonate="chrome", timeout=15)
-            
-            # Exibe o Status Code
-            st.subheader("Status da Requisição")
-            if resposta.status_code == 200:
-                st.success(f"Sucesso! Status Code: {resposta.status_code}")
+            body = json.loads(body_raw)
+        except json.JSONDecodeError:
+            st.warning("⚠️ Body inválido — ignorado.")
+
+    with st.spinner("Aguardando resposta..."):
+        start = time.time()
+        response = None
+        error_msg = None
+
+        try:
+            if "curl_cffi" in engine and CURL_CFFI_AVAILABLE:
+                impersonate_map = {
+                    "curl_cffi (Chrome120)": "chrome120",
+                    "curl_cffi (Chrome110)": "chrome110",
+                    "curl_cffi (Firefox110)": "firefox110",
+                }
+                imp = impersonate_map.get(engine, "chrome120")
+                headers = {"User-Agent": user_agent, "Accept": accept}
+                headers.update(extra)
+                response = cffi_requests.request(
+                    method=method,
+                    url=url,
+                    headers=headers,
+                    json=body if body else None,
+                    timeout=timeout,
+                    verify=verify_ssl,
+                    allow_redirects=allow_redirects,
+                    impersonate=imp,
+                )
             else:
-                st.warning(f"Aviso! Status Code: {resposta.status_code}")
-            
-            # Tenta parsear e exibir o JSON
-            st.subheader("Dados do JSON")
-            try:
-                dados_json = resposta.json()
-                st.json(dados_json)
-            except Exception:
-                # Caso venha string misturada, tenta forçar um decode
-                try:
-                    dados_json = json.loads(resposta.text)
-                    st.json(dados_json)
-                except ValueError:
-                    st.error("A resposta recebida não é um JSON válido.")
-                    st.text_area("Resposta bruta (Texto):", value=resposta.text, height=300)
-                
+                headers = {
+                    "User-Agent": user_agent,
+                    "Accept": accept,
+                    "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+                    "Accept-Encoding": "gzip, deflate, br",
+                    "Connection": "keep-alive",
+                }
+                headers.update(extra)
+                session = std_requests.Session()
+                response = session.request(
+                    method=method,
+                    url=url,
+                    headers=headers,
+                    json=body if body else None,
+                    timeout=timeout,
+                    verify=verify_ssl,
+                    allow_redirects=allow_redirects,
+                )
         except Exception as e:
-            st.error(f"Erro de conexão ao tentar acessar a API: {e}")
+            error_msg = str(e)
+
+        elapsed = time.time() - start
+
+        if error_msg:
+            st.error(f"💥 Erro: {error_msg}")
+        elif response is not None:
+            st.markdown("---")
+            st.subheader("📡 Status da Requisição")
+            status = response.status_code
+            color = "🟢" if 200 <= status < 300 else ("🟡" if 300 <= status < 400 else ("🟠" if status < 500 else "🔴"))
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Status Code", f"{color} {status}")
+            c2.metric("Tempo de Resposta", f"{elapsed:.3f}s")
+            c3.metric("Tamanho", f"{len(response.content) / 1024:.2f} KB")
+            final_url = str(response.url)
+            c4.metric("URL Final", final_url[:35] + "..." if len(final_url) > 35 else final_url)
+
+            # Diagnóstico de redirect
+            if 300 <= status < 400:
+                location = response.headers.get("Location", "?")
+                st.warning(
+                    f"🔀 **Redirect {status} detectado!**\n\n"
+                    f"O servidor está redirecionando para: `{location}`\n\n"
+                    f"➡️ Isso explica o problema — o nginx em HTTP não serve a API. "
+                    f"Marque '**Seguir redirecionamentos**' OFF (padrão) para forçar resposta no HTTPS."
+                )
+            elif 200 <= status < 300:
+                st.success(f"✅ Sucesso! Status Code: {status}")
+            elif status == 403:
+                st.error("🚫 403 — Acesso negado.")
+            elif status == 406:
+                st.error("❌ 406 — Servidor rejeitou o Accept header.")
+            else:
+                st.warning(f"⚠️ Status Code: {status}")
+
+            # Histórico de redirects
+            if hasattr(response, "history") and response.history:
+                with st.expander(f"🔀 Histórico de redirecionamentos ({len(response.history)})"):
+                    for r in response.history:
+                        st.write(f"→ `{r.status_code}` {r.url} → `{r.headers.get('Location','?')}`")
+                    st.write(f"✅ Final: `{status}` {response.url}")
+
+            with st.expander("📋 Headers da Resposta"):
+                st.json(dict(response.headers))
+
+            # --- JSON ---
+            st.markdown("---")
+            st.subheader("📦 Dados do JSON")
+
+            parsed_json = None
+            try:
+                parsed_json = response.json()
+            except Exception:
+                try:
+                    text = response.text.strip()
+                    if text.startswith("{") or text.startswith("["):
+                        parsed_json = json.loads(text)
+                except Exception:
+                    pass
+
+            if parsed_json is not None:
+                st.success("✅ JSON válido recebido!")
+                st.json(parsed_json)
+                json_str = json.dumps(parsed_json, indent=2, ensure_ascii=False)
+                st.download_button("⬇️ Baixar JSON", data=json_str, file_name="response.json", mime="application/json")
+
+                # Xtream Codes
+                if "user_info" in parsed_json or "server_info" in parsed_json:
+                    st.markdown("---")
+                    st.subheader("🎯 Xtream Codes API")
+                    col1, col2 = st.columns(2)
+                    if "user_info" in parsed_json:
+                        with col1:
+                            st.markdown("**👤 user_info**")
+                            for k, v in parsed_json["user_info"].items():
+                                st.write(f"• **{k}**: `{v}`")
+                    if "server_info" in parsed_json:
+                        with col2:
+                            st.markdown("**🖥️ server_info**")
+                            for k, v in parsed_json["server_info"].items():
+                                st.write(f"• **{k}**: `{v}`")
+            else:
+                content_type = response.headers.get("Content-Type", "")
+                st.error("❌ A resposta não é um JSON válido.")
+                st.markdown(f"**Content-Type:** `{content_type}`")
+                preview = response.text[:3000]
+                lang = "html" if "<html" in preview.lower() else "text"
+                st.code(preview, language=lang)
+
+# Preview headers
+with st.expander("🔍 Ver headers que serão enviados"):
+    preview_h = {"User-Agent": user_agent, "Accept": accept}
+    try:
+        preview_h.update(json.loads(extra_headers_raw))
+    except Exception:
+        pass
+    if CURL_CFFI_AVAILABLE and "curl_cffi" in engine:
+        st.info("ℹ️ curl_cffi adiciona automaticamente headers TLS/HTTP2 reais do Chrome.")
+    st.json(preview_h)
+
+# Sidebar
+st.sidebar.markdown("## 🔧 Engine Status")
+if CURL_CFFI_AVAILABLE:
+    st.sidebar.success("✅ curl_cffi disponível")
+else:
+    st.sidebar.warning("⚠️ curl_cffi não instalado\n\n`pip install curl_cffi`")
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("## 💡 Dica: 406 / nginx default")
+st.sidebar.info(
+    "Se o servidor retorna a página padrão do nginx com 406:\n\n"
+    "**Causa:** HTTPS redireciona para HTTP onde o app não está configurado.\n\n"
+    "**Fix:** Desative '**Seguir redirecionamentos**' (padrão OFF) para que a requisição "
+    "responda direto no HTTPS sem seguir o redirect para HTTP."
+)

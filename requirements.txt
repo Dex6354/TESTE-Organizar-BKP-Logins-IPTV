@@ -3,3 +3,4 @@ pandas
 requests
 urllib3
 curl_cffi
+httpx

@@ -2,33 +2,24 @@ import streamlit as st
 import json
 import re
 import os
+import time
 import pandas as pd
 import requests
 import urllib3
 import ssl
 import urllib.request
+import threading
 from urllib.parse import quote, unquote
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Desabilitar avisos de segurança SSL
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# Configurações de cabeçalhos realistas
-HEADERS_BROWSER = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-    "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
-    "Connection": "keep-alive"
-}
-
-HEADERS_VLC = {
-    "User-Agent": "VLC/3.0.18 LibVLC/3.0.18",
-    "Accept": "*/*",
-    "Connection": "keep-alive"
-}
+# Trava global para organizar as chamadas da API Scrape.do em fila
+scrapedo_lock = threading.Lock()
 
 class LegacySslAdapter(requests.adapters.HTTPAdapter):
-    """Adaptador SSL para compatibilidade com cifras antigas e servidores legados."""
+    """Adaptador SSL para compatibilidade máxima com cifras antigas e servidores legados."""
     def init_poolmanager(self, *args, **kwargs):
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
@@ -45,81 +36,76 @@ class LegacySslAdapter(requests.adapters.HTTPAdapter):
         return super(LegacySslAdapter, self).init_poolmanager(*args, **kwargs)
 
 def test_single_user(user):
-    """Testa o status do usuário com fallbacks para servidores modernos, legados e redirecionamentos."""
-    name = user.get('name', '')
-    url = user.get('url', '')
+    """Testa o status do usuário com fallbacks locais e uso condicional da API Scrape.do."""
+    try:
+        name = user.get('name', '')
+        url = user.get('url', '')
 
-    # Remove emoji de status antigo (✅ ou ❌) se já existir no início do nome
-    name = re.sub(r'^[✅❌]\s*', '', name)
+        # Remove emoji de status antigo
+        name = re.sub(r'^[✅❌]\s*', '', name)
 
-    # 1. Extrai ou obtém o usuário
-    username = user.get('username') or user.get('user', '')
-    if not username:
-        user_match = re.search(r"username=([^&]+)", url, re.IGNORECASE)
-        username = unquote(user_match.group(1)) if user_match else ""
-    else:
-        username = unquote(str(username))
+        username = user.get('username') or user.get('user', '')
+        if not username:
+            user_match = re.search(r"username=([^&]+)", url, re.IGNORECASE)
+            username = unquote(user_match.group(1)) if user_match else ""
+        else:
+            username = unquote(str(username))
 
-    # 2. Extrai ou obtém a senha
-    password = user.get('password') or user.get('pass', '')
-    if not password:
-        pass_match = re.search(r"password=([^&]+)", url, re.IGNORECASE)
-        password = unquote(pass_match.group(1)) if pass_match else ""
-    else:
-        password = unquote(str(password))
+        password = user.get('password') or user.get('pass', '')
+        if not password:
+            pass_match = re.search(r"password=([^&]+)", url, re.IGNORECASE)
+            password = unquote(pass_match.group(1)) if pass_match else ""
+        else:
+            password = unquote(str(password))
 
-    # 3. Higieniza a URL base
-    base_match = re.search(r"(https?://[^/]+)", url)
-    base = base_match.group(1) if base_match else url
-    if base:
-        base = base.rstrip('/')
-        if not base.startswith(('http://', 'https://')):
-            base = 'http://' + base
+        base_match = re.search(r"(https?://[^/]+)", url)
+        base = base_match.group(1) if base_match else url
+        if base:
+            base = base.rstrip('/')
+            if not base.startswith(('http://', 'https://')):
+                base = 'http://' + base
 
-    status = "offline"
-
-    if username and password and base:
-        api_url = f"{base}/player_api.php?username={quote(username)}&password={quote(password)}"
-        
-        # Gera variações de protocolo para cobrir redirecionamentos estritos de portas
-        urls_to_test = [api_url]
-        if api_url.startswith("https://"):
-            urls_to_test.append(api_url.replace("https://", "http://", 1))
-        elif api_url.startswith("http://"):
-            urls_to_test.append(api_url.replace("http://", "https://", 1))
-
+        status = "offline"
+        retorno_code = "Erro/Timeout"
         found_active = False
+        last_tested_url = ""
 
-        for target_url in urls_to_test:
-            if found_active:
-                break
+        if username and password and base:
+            api_url = f"{base}/player_api.php?username={quote(username)}&password={quote(password)}"
+            urls_to_test = [api_url]
+            if api_url.startswith("https://"):
+                urls_to_test.append(api_url.replace("https://", "http://", 1))
+            elif api_url.startswith("http://"):
+                urls_to_test.append(api_url.replace("http://", "https://", 1))
 
-            # ESTRATÉGIA 1: Conexão Moderna (Padrão do navegador - Resolve websmt.ca)
-            for headers in [HEADERS_BROWSER, HEADERS_VLC]:
-                try:
-                    resp = requests.get(target_url, headers=headers, verify=False, timeout=8, allow_redirects=True)
-                    content = resp.text
-                    if "user_info" in content:
-                        if '"status":"Expired"' in content.replace(" ", "") or '"status":"expired"' in content.replace(" ", ""):
-                            status = "offline"
-                        else:
-                            status = "active"
-                        found_active = True
-                        break
-                except:
-                    continue
+            user_agents = [
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "VLC/3.0.18 LibVLC/3.0.18",
+                "IPTVSmartersPlayer"
+            ]
 
-            if found_active:
-                break
+            # --- TESTE NATIVO LOCAL ---
+            for target_url in urls_to_test:
+                if found_active:
+                    break
+                last_tested_url = target_url
 
-            # ESTRATÉGIA 2: Conexão Legada (Força SECLEVEL=0 - Resolve odira.sbs)
-            try:
-                with requests.Session() as session:
-                    session.mount("https://", LegacySslAdapter())
-                    for headers in [HEADERS_BROWSER, HEADERS_VLC]:
-                        try:
-                            resp = session.get(target_url, headers=headers, verify=False, timeout=8, allow_redirects=True)
+                for ua in user_agents:
+                    headers = {
+                        "User-Agent": ua,
+                        "Accept": "*/*",
+                        "Connection": "keep-alive"
+                    }
+
+                    # MÉTODO 1: Requests
+                    try:
+                        with requests.Session() as session:
+                            session.mount("https://", LegacySslAdapter())
+                            resp = session.get(target_url, headers=headers, verify=False, timeout=8)
+                            retorno_code = str(resp.status_code)
+                            resp.encoding = resp.apparent_encoding
                             content = resp.text
+
                             if "user_info" in content:
                                 if '"status":"Expired"' in content.replace(" ", "") or '"status":"expired"' in content.replace(" ", ""):
                                     status = "offline"
@@ -127,47 +113,114 @@ def test_single_user(user):
                                     status = "active"
                                 found_active = True
                                 break
+                    except:
+                        pass
+
+                    # MÉTODO 2: Urllib Fallback
+                    if not found_active:
+                        try:
+                            ssl_ctx = ssl._create_unverified_context()
+                            try:
+                                ssl_ctx.set_ciphers('ALL:@SECLEVEL=0')
+                            except:
+                                pass
+                            req = urllib.request.Request(target_url, headers=headers)
+                            with urllib.request.urlopen(req, context=ssl_ctx, timeout=8) as response:
+                                retorno_code = str(response.getcode())
+                                content = response.read().decode('utf-8', errors='ignore')
+                                if "user_info" in content:
+                                    if '"status":"Expired"' in content.replace(" ", "") or '"status":"expired"' in content.replace(" ", ""):
+                                        status = "offline"
+                                    else:
+                                        status = "active"
+                                    found_active = True
+                                    break
+                        except urllib.error.HTTPError as e:
+                            retorno_code = str(e.code)
                         except:
-                            continue
-            except:
-                pass
+                            pass
 
-            if found_active:
-                break
+            # Validação estrita para falso positivo (Retornou 200 mas não possui JSON válido)
+            if retorno_code == "200" and not found_active:
+                retorno_code = "404"
 
-            # ESTRATÉGIA 3: Fallback Nativo do Sistema (urllib)
-            for headers in [HEADERS_BROWSER, HEADERS_VLC]:
-                try:
-                    ssl_ctx = ssl._create_unverified_context()
-                    req = urllib.request.Request(target_url, headers=headers)
-                    with urllib.request.urlopen(req, context=ssl_ctx, timeout=8) as response:
-                        content = response.read().decode('utf-8', errors='ignore')
-                        if "user_info" in content:
-                            if '"status":"Expired"' in content.replace(" ", "") or '"status":"expired"' in content.replace(" ", ""):
-                                status = "offline"
+            # --- SELETOR DE CONDIÇÃO DA API SCRAPE.DO ---
+            if status == "offline" and retorno_code not in ["200", "403", "521", "404"]:
+                # Uso do Lock garante que apenas uma thread use a API por vez evitando rate limit
+                with scrapedo_lock:
+                    API_URL = "http://api.scrape.do/"
+                    TOKEN = "3a23ea3810a04b16bccfac96a2c3b1af73c97a98ef5"
+                    
+                    params = {
+                        "token": TOKEN,
+                        "url": last_tested_url if last_tested_url else api_url,
+                        "geoCode": "BR"
+                    }
+
+                    max_retries = 3
+                    delay = 2
+                    for attempt in range(max_retries):
+                        try:
+                            scrape_resp = requests.get(API_URL, params=params, timeout=15)
+                            
+                            if scrape_resp.status_code == 429:
+                                if attempt < max_retries - 1:
+                                    time.sleep(delay)
+                                    delay *= 2
+                                    continue
+                                else:
+                                    retorno_code = "429"
+                                    break
+                            
+                            if scrape_resp.status_code == 200:
+                                scrape_content = scrape_resp.text
+                                
+                                if "user_info" in scrape_content:
+                                    scrape_content_clean = scrape_content.replace(" ", "")
+                                    if '"status":"Expired"' in scrape_content_clean or '"status":"expired"' in scrape_content_clean:
+                                        status = "offline"
+                                    else:
+                                        status = "active"
+                                    retorno_code = "200"
+                                else:
+                                    retorno_code = "404"
                             else:
-                                status = "active"
-                            found_active = True
+                                # Captura o código inicial retornado pelo cabeçalho do scrape.do se disponível
+                                initial_status = scrape_resp.headers.get("scrape.do-initial-status-code")
+                                retorno_code = str(initial_status) if initial_status else str(scrape_resp.status_code)
                             break
-                except:
-                    continue
+                        except:
+                            if attempt < max_retries - 1:
+                                time.sleep(delay)
+                                delay *= 2
+                            else:
+                                retorno_code = "Erro API"
+                    
+                    # Pequeno intervalo de segurança entre requisições sequenciais à API
+                    time.sleep(0.3)
 
-    # Define o novo emoji com base no status atualizado
-    user['name'] = f"✅ {name}" if status == "active" else f"❌ {name}"
-    
-    # Monta a URL JSON final para a tabela clicável
-    if username and password and base:
-        user['json_link'] = f"{base}/player_api.php?username={quote(username)}&password={quote(password)}"
-    else:
-        user['json_link'] = ""
+        user['name'] = f"✅ {name}" if status == "active" else f"❌ {name}"
+        user['retorno'] = retorno_code
         
+        if username and password and base:
+            user['json_link'] = f"{base}/player_api.php?username={quote(username)}&password={quote(password)}"
+        else:
+            user['json_link'] = ""
+
+    except Exception:
+        user['retorno'] = "Erro Script"
+        orig_name = user.get('name', 'Usuario')
+        orig_name = re.sub(r'^[✅❌]\s*', '', orig_name)
+        user['name'] = f"❌ {orig_name}"
+        if 'json_link' not in user:
+            user['json_link'] = ""
+            
     return user
 
 def sort_users(users_list):
     """Organiza a lista de usuários com base na hierarquia estipulada."""
     def get_sort_key(user):
         name = user.get('name', '')
-        
         if '✅' in name: r1 = 0
         elif '❌' in name: r1 = 1
         else: r1 = 2
@@ -184,8 +237,7 @@ def sort_users(users_list):
         elif '📱' in name: r4 = 1
         else: r4 = 2
             
-        r5 = name.lower()
-        return (r1, r2, r3, r4, r5)
+        return (r1, r2, r3, r4, name.lower())
 
     return sorted(users_list, key=get_sort_key)
 
@@ -208,7 +260,10 @@ if uploaded_file is not None:
                 with ThreadPoolExecutor(max_workers=10) as executor:
                     futures = [executor.submit(test_single_user, user) for user in original_users]
                     for future in as_completed(futures):
-                        tested_users.append(future.result())
+                        try:
+                            tested_users.append(future.result())
+                        except Exception as e:
+                            st.error(f"Erro em thread descartado: {e}")
 
             st.success("Análise de status concluída com sucesso!")
             organized_users = sort_users(tested_users)
@@ -218,13 +273,15 @@ if uploaded_file is not None:
             df_users = pd.DataFrame(organized_users)
             
             cols = list(df_users.columns)
-            for c in ['name', 'url', 'json_link']:
+            for c in ['name', 'retorno', 'url', 'json_link']:
                 if c in cols:
                     cols.remove(c)
             
             ordered_cols = []
             if 'name' in df_users.columns:
                 ordered_cols.append('name')
+            if 'retorno' in df_users.columns:
+                ordered_cols.append('retorno')
             if 'url' in df_users.columns:
                 ordered_cols.append('url')
                 
@@ -242,14 +299,16 @@ if uploaded_file is not None:
                 column_config={
                     "userid": None,
                     "type": None,
+                    "retorno": st.column_config.TextColumn("Retorno HTTP", help="Código de status HTTP retornado pelo servidor"),
                     "json_link": st.column_config.LinkColumn("Link JSON", help="URL gerada para a API do Player")
                 },
-                disabled=["json_link"]
+                disabled=["json_link", "retorno"]
             )
 
             edited_users = edited_df.to_dict(orient="records")
             for user in edited_users:
                 user.pop('json_link', None)
+                user.pop('retorno', None)
 
             new_data = {"multi_users": edited_users}
             organized_content = json.dumps(new_data, indent=2, ensure_ascii=False)

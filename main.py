@@ -2,6 +2,14 @@ import streamlit as st
 import httpx
 import json
 
+# Trava de segurança para garantir que o HTTP/2 está disponível
+try:
+    import h2
+except ImportError:
+    st.error("⚠️ Falta o suporte para HTTP/2 no seu ambiente!")
+    st.warning("Pare a aplicação e execute no terminal:\n\n`pip install \"httpx[http2]\"`")
+    st.stop()
+
 st.set_page_config(page_title="Xtream API Debugger", layout="wide")
 
 st.title("🛠️ Debugger Avançado (HTTP/2 & Headers)")

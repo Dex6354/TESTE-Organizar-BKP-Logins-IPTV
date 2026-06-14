@@ -140,7 +140,7 @@ def test_single_user(user):
                         pass
 
     # Define o novo emoji com base no status atualizado
-    user['name'] = f"✅ {name}" if status == "active" else f"❌ {name}"
+    user['name'] = f"✅{name}" if status == "active" else f"❌{name}"
     user['retorno'] = retorno_code
     
     # Monta a URL JSON final para a tabela clicável

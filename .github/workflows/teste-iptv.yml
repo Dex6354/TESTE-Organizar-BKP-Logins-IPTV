@@ -1,0 +1,21 @@
+name: Teste IPTV
+
+on:
+  workflow_dispatch:
+
+jobs:
+  teste:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Mostrar IP publico
+        run: |
+          echo "IP:"
+          curl https://api.ipify.org
+          echo
+
+      - name: Testar IPTV
+        run: |
+          curl -i \
+          -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36" \
+          "https://websmt.ca/player_api.php?username=concmus03&password=3a3b3c3d"

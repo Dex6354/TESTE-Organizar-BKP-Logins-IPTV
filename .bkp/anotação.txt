@@ -1,0 +1,1 @@
+scrape.do funciona apenas se ativar "Super (Residential & Mobile Proxies)" e "Geo Targeting=Brazil"

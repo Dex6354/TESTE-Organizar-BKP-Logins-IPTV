@@ -9,7 +9,7 @@ st.write("Requisição utilizando Proxies e Geo-Targeting Brasil via Geonode.")
 # Configurações da API Geonode
 API_URL = "https://scraper.geonode.io/v1/extract"
 API_KEY = "4c6317bd-c28f-4816-8a92-a3d8f362a6fa"
-TARGET_URL = "http://websmt.ca/player_api.php?username=concmus03&password=3a3b3c3d"
+TARGET_URL = "https://websmt.ca/player_api.php?username=concmus03&password=3a3b3c3d"
 
 headers = {
     "x-api-key": API_KEY,

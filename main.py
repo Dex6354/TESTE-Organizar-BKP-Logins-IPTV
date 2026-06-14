@@ -25,7 +25,7 @@ payload = {
     "processing_mode": "sync",
     "proxy": {
         "country": "BR",
-        "type": "datacenter"
+        "type": "residential"
     },
     "headers": {
         "Accept-Language": "en-US"

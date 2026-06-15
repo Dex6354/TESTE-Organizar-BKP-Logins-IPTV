@@ -143,10 +143,10 @@ def test_single_user(user):
     user['name'] = f"✅{name}" if status == "active" else f"❌{name}"
     user['retorno'] = retorno_code
     
-    # Monta as URLs finais para a tabela
+    # Monta as URLs finais para a tabela usando a base do servidor encontrada na URL original
     if username and password and base:
         user['json_link'] = f"{base}/player_api.php?username={quote(username)}&password={quote(password)}"
-        user['m3u_link'] = f"http://websmt.ca/get.php?username={quote(username)}&password={quote(password)}&type=m3u_plus"
+        user['m3u_link'] = f"{base}/get.php?username={quote(username)}&password={quote(password)}&type=m3u_plus"
     else:
         user['json_link'] = ""
         user['m3u_link'] = ""
@@ -239,9 +239,9 @@ if uploaded_file is not None:
                     "type": None,
                     "retorno": st.column_config.TextColumn("Retorno HTTP", help="Código de status HTTP retornado pelo servidor"),
                     "json_link": st.column_config.LinkColumn("Link JSON", help="URL gerada para a API do Player"),
-                    "m3u_link": st.column_config.TextColumn("Link M3U", help="Clique duas vezes ou selecione a célula para copiar o link")
+                    "m3u_link": st.column_config.TextColumn("Link M3U", help="Dê duplo clique na célula para selecionar e copiar o texto")
                 },
-                disabled=["json_link", "retorno", "m3u_link"]
+                disabled=["json_link", "retorno"] # m3u_link removido daqui para permitir seleção e cópia de texto
             )
 
             # Verifica se houve alguma alteração estrutural ou de valores

@@ -282,9 +282,19 @@ def sort_users(users_list):
 
 st.set_page_config(page_title="Organizador de Logins", layout="wide")
 
-# CSS para Otimização Mobile Extrema (Evita quebras de layout e cortes de texto)
+# CSS para conter estritamente a largura e quebrar textos na lista suspensa (selectbox) aberta no mobile
 st.markdown("""
     <style>
+        /* Limita e força quebra de texto na lista aberta do selectbox (BaseWeb Popover) */
+        div[data-baseweb="popover"], ul[role="listbox"] {
+            max-width: 92vw !important;
+            box-sizing: border-box !important;
+        }
+        ul[role="listbox"] li {
+            white-space: normal !important;
+            word-break: break-all !important;
+        }
+        /* Ajustes de responsividade global e tabelas */
         .stDataFrame, div[data-testid="stTable"], .stMarkdown {
             word-break: break-word !important;
             white-space: pre-wrap !important;
@@ -373,14 +383,12 @@ if uploaded_file is not None:
                 row = st.session_state.df_users[st.session_state.df_users['name'] == selected_server].iloc[0]
                 details = row.get('_search_details', {"Canais": [], "Filmes": [], "Séries": []})
                 
-                # Monta estritamente a lista linha por linha desejada pelo usuário
                 lines = []
                 for f in details.get("Filmes", []):
                     lines.append(f)
                 for s in details.get("Séries", []):
                     lines.append(f"Séries: {s}")
                 
-                # Canais por último obrigatoriamente
                 if details.get("Canais"):
                     lines.append(f"Canais ({len(details['Canais'])})")
                 elif int(row.get('Canais', 0)) > 0:
@@ -388,7 +396,6 @@ if uploaded_file is not None:
                 
                 if lines:
                     with st.expander(f"📦 Itens do Servidor - {row.get('username', 'N/A')}", expanded=True):
-                        # Gera o HTML forçando quebras estritas e responsividade mobile sem esticar a tela
                         html_formatado = "<br>".join(lines)
                         st.markdown(f"""
                         <div style="white-space: pre-wrap; word-break: break-word; font-size: 14px; line-height: 1.6; max-width: 100%;">

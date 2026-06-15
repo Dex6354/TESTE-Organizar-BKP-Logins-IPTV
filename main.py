@@ -297,6 +297,14 @@ st.set_page_config(page_title="Organizador de Logins", layout="wide")
 st.markdown(
     """
     <style>
+    /* Força quebra de linha por item em qualquer visualização expandida do Grid */
+    [class*="glideDataGrid-portal"] textarea,
+    .glideDataGrid-portal textarea {
+        white-space: pre !important;
+        word-break: initial !important;
+        overflow-wrap: initial !important;
+    }
+
     @media (max-width: 768px) {
         /* Redefine de forma absoluta a posição e largura de qualquer portal flutuante */
         [class*="glideDataGrid-portal"], .glideDataGrid-portal,

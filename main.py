@@ -350,7 +350,6 @@ if uploaded_file is not None:
                 st.session_state.df_users = pd.DataFrame(sort_users(updated_list))
                 st.rerun()
 
-            # Seletor alternativo para garantir compatibilidade entre versões do Streamlit
             st.markdown("---")
             server_names = st.session_state.df_users['name'].tolist()
             selected_server = st.selectbox("🔍 Selecione um servidor da lista abaixo para inspecionar os conteúdos encontrados:", ["Nenhum selecionado"] + server_names)
@@ -359,7 +358,7 @@ if uploaded_file is not None:
                 row = st.session_state.df_users[st.session_state.df_users['name'] == selected_server].iloc[0]
                 details = row.get('_search_details', {"Canais": [], "Filmes": [], "Séries": []})
                 
-                categories_order = ["Filmes", "Séries", "Canais"] # Canais por último
+                categories_order = ["Filmes", "Séries", "Canais"]  # Canais rigidamente por último
                 has_content = any(details.get(cat) for cat in categories_order)
                 
                 if has_content:
@@ -368,8 +367,10 @@ if uploaded_file is not None:
                             matches = details.get(cat, [])
                             if matches:
                                 st.markdown(f"**{cat}:**")
-                                for item in matches:
-                                    st.write(f"- {item}") # Exibe estritamente um item por linha
+                                # Gera uma única string unida por quebras de linha estritas (\n) para forçar um por linha
+                                texto_formatado = "\n".join([f"- {item}" for item in matches])
+                                st.markdown(texto_formatado)
+                                st.markdown("")  # Espaçamento entre categorias
                 else:
                     st.info(f"Nenhum item correspondente encontrado para este servidor com o termo '{search_query}'.")
 

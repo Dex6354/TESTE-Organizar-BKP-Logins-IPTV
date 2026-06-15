@@ -293,25 +293,28 @@ def sort_users(users_list):
 
 st.set_page_config(page_title="Organizador de Logins", layout="wide")
 
-# CSS focado em conter o tamanho de qualquer caixa/portal expandido no mobile
+# CSS focado em neutralizar o cálculo de largura/posição inline do Glide Data Grid no Mobile
 st.markdown(
     """
     <style>
     @media (max-width: 768px) {
-        /* Alvo nos portais flutuantes do data editor, menus e áreas de texto expandidas */
-        .glideDataGrid-portal, 
-        .glideDataGrid-portal div,
-        div[data-baseweb="popover"], 
-        div[data-baseweb="menu"],
-        div[role="dialog"],
-        textarea {
-            max-width: 85vw !important;
-            box-sizing: border-box !important;
+        /* Neutraliza o deslocamento para a direita e limita a largura do portal de expansão */
+        [class*="glideDataGrid-portal"], .glideDataGrid-portal {
+            left: 5vw !important;
+            width: 90vw !important;
+            max-width: 90vw !important;
         }
         
-        /* Garante que o editor de dados não quebre o overflow horizontal do container */
-        div[data-testid="stDataEditor"], .stDataEditor {
-            max-width: 100% !important;
+        /* Força os blocos internos, diálogos e caixas de texto clonadas a respeitarem a tela */
+        [class*="glideDataGrid-portal"] div,
+        [class*="glideDataGrid-portal"] textarea,
+        .glideDataGrid-portal div,
+        .glideDataGrid-portal textarea,
+        div[data-baseweb="popover"],
+        div[data-baseweb="menu"] {
+            width: 100% !important;
+            max-width: 88vw !important;
+            box-sizing: border-box !important;
         }
     }
     </style>

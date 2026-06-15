@@ -228,18 +228,16 @@ def test_single_user(user, search_query=""):
     
     if search_query:
         match_segments = []
-        if search_matches["Canais"]: 
-            match_segments.append(f"Canais ({len(search_matches['Canais'])})")
         if search_matches["Filmes"]: 
             filmes_inline = ", ".join(search_matches["Filmes"][:2])
-            if len(search_matches["Filmes"]) > 2:
-                filmes_inline += f" (+{len(search_matches['Filmes']) - 2})"
+            if len(search_matches["Filmes"]) > 2: filmes_inline += f" (+{len(search_matches['Filmes']) - 2})"
             match_segments.append(f"Filmes: {filmes_inline}")
         if search_matches["Séries"]: 
             series_inline = ", ".join(search_matches["Séries"][:2])
-            if len(search_matches["Séries"]) > 2:
-                series_inline += f" (+{len(search_matches['Séries']) - 2})"
+            if len(search_matches["Séries"]) > 2: series_inline += f" (+{len(search_matches['Séries']) - 2})"
             match_segments.append(f"Séries: {series_inline}")
+        if search_matches["Canais"]: 
+            match_segments.append(f"Canais ({len(search_matches['Canais'])})")
             
         user['Resultados Busca'] = " | ".join(match_segments) if match_segments else "Nenhum"
         user['_search_details'] = search_matches
@@ -328,11 +326,14 @@ if uploaded_file is not None:
 
         if "df_users" in st.session_state:
             st.subheader("Lista Organizada")
+            st.caption("💡 Clique em cima de qualquer linha para abrir os detalhes suspensos com itens linha por linha abaixo.")
 
             edited_df = st.data_editor(
                 st.session_state.df_users, 
                 num_rows="dynamic", 
                 use_container_width=True,
+                selection_mode="single_row",  # Habilita a seleção ao clicar na linha/coluna
+                key="table_editor",
                 column_config={
                     "userid": None, "type": None, "_search_details": None,
                     "name": st.column_config.TextColumn("Nome"),
@@ -351,6 +352,33 @@ if uploaded_file is not None:
                 updated_list = edited_df.to_dict(orient="records")
                 st.session_state.df_users = pd.DataFrame(sort_users(updated_list))
                 st.rerun()
+
+            # Captura a linha clicada pelo usuário
+            selected_rows = st.session_state.table_editor.get("selection", {}).get("rows", [])
+            
+            if selected_rows:
+                selected_idx = selected_rows[0]
+                if selected_idx < len(st.session_state.df_users):
+                    row = st.session_state.df_users.iloc[selected_idx]
+                    details = row.get('_search_details', {"Canais": [], "Filmes": [], "Séries": []})
+                    
+                    st.markdown(f"### 🍿 Detalhes do Servidor Selecionado: {row['name']}")
+                    
+                    # Ordem customizada: Canais por último
+                    categories_order = ["Filmes", "Séries", "Canais"]
+                    
+                    has_content = any(details.get(cat) for cat in categories_order)
+                    
+                    if has_content:
+                        with st.expander(f"📦 Lista Suspensa de Itens - {row.get('username', 'N/A')}", expanded=True):
+                            for cat in categories_order:
+                                matches = details.get(cat, [])
+                                if matches:
+                                    st.markdown(f"**{cat}:**")
+                                    for item in matches:
+                                        st.write(f"- {item}")  # Exibe estritamente um item por linha
+                    else:
+                        st.info(f"Nenhum item correspondente encontrado para este servidor com o termo '{search_query}'.")
 
             edited_users = st.session_state.df_users.to_dict(orient="records")
             for user in edited_users:
@@ -375,25 +403,6 @@ if uploaded_file is not None:
                 file_name=download_file_name,
                 mime="application/octet-stream"
             )
-
-            if search_query and '_search_details' in st.session_state.df_users.columns:
-                st.markdown("### 🍿 Detalhes dos Itens Encontrados")
-                encontrou_algo = False
-                
-                for _, row in st.session_state.df_users.iterrows():
-                    details = row.get('_search_details')
-                    if details and any(details.values()):
-                        encontrou_algo = True
-                        with st.expander(f"📦 {row['name']} | Usuário: {row.get('username', 'N/A')}"):
-                            for cat, matches in details.items():
-                                if matches:
-                                    st.markdown(f"**{cat}:**")
-                                    for item in matches[:15]:
-                                        st.write(f"- {item}")
-                                    if len(matches) > 15:
-                                        st.write(f"... e mais {len(matches)-15} correspondências.")
-                if not encontrou_algo:
-                    st.info(f"Nenhum título correspondente a '{search_query}' foi localizado nos servidores ativos.")
 
     except json.JSONDecodeError:
         st.error("Erro ao decodificar o arquivo JSON. Certifique-se de que é um arquivo JSON válido.")

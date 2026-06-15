@@ -293,15 +293,25 @@ def sort_users(users_list):
 
 st.set_page_config(page_title="Organizador de Logins", layout="wide")
 
-# CSS customizado para corrigir estouro de largura em telas mobile
+# CSS focado em conter o tamanho de qualquer caixa/portal expandido no mobile
 st.markdown(
     """
     <style>
     @media (max-width: 768px) {
-        /* Evita que menus suspensos, popovers e tabelas fiquem maiores que a tela */
-        div[data-baseweb="popover"], div[data-baseweb="menu"], .stDataEditor {
-            max-width: 10vw !important;
-            overflow-x: auto !important;
+        /* Alvo nos portais flutuantes do data editor, menus e áreas de texto expandidas */
+        .glideDataGrid-portal, 
+        .glideDataGrid-portal div,
+        div[data-baseweb="popover"], 
+        div[data-baseweb="menu"],
+        div[role="dialog"],
+        textarea {
+            max-width: 85vw !important;
+            box-sizing: border-box !important;
+        }
+        
+        /* Garante que o editor de dados não quebre o overflow horizontal do container */
+        div[data-testid="stDataEditor"], .stDataEditor {
+            max-width: 100% !important;
         }
     }
     </style>

@@ -389,7 +389,7 @@ if uploaded_file is not None:
                     "Canais": st.column_config.NumberColumn("📺 Canais"),
                     "Filmes": st.column_config.NumberColumn("🎬 Filmes"),
                     "Séries": st.column_config.NumberColumn("🍿 Séries"),
-                    "Resultados Busca": st.column_config.TextColumn("🔎 Resultado Busca"),
+                    "Resultados Busca": st.column_config.TextColumn("🔎 Resultado Busca", width="small"),
                     "json_link": st.column_config.LinkColumn("Link JSON"),
                     "m3u_link": st.column_config.TextColumn("Link M3U")
                 },

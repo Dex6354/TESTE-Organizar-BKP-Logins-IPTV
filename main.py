@@ -250,7 +250,8 @@ def test_single_user(user, search_query=""):
             match_segments.append("Canais:")
             for canal in search_matches["Canais"][:2]:
                 match_segments.append(f"- {canal}")
-            match_segments.append(f"- ({len(search_matches['Canais'])})")
+            if len(search_matches["Canais"]) > 2:
+                match_segments.append(f"- (+{len(search_matches['Canais']) - 2})")
             
         user['Resultados Busca'] = "\n".join(match_segments) if match_segments else "Nenhum"
         user['_search_details'] = search_matches

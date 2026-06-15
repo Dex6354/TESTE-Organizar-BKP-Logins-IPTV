@@ -281,6 +281,21 @@ def sort_users(users_list):
 
 
 st.set_page_config(page_title="Organizador de Logins", layout="wide")
+
+# CSS para Otimização Mobile Extrema (Evita quebras de layout e cortes de texto)
+st.markdown("""
+    <style>
+        .stDataFrame, div[data-testid="stTable"], .stMarkdown {
+            word-break: break-word !important;
+            white-space: pre-wrap !important;
+        }
+        div[data-testid="stExpander"] {
+            max-width: 100% !important;
+            overflow-x: hidden !important;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
 st.subheader("Organizador de Logins .dev")
 
 uploaded_file = st.file_uploader("Escolha um arquivo .dev", type="dev")
@@ -352,27 +367,36 @@ if uploaded_file is not None:
 
             st.markdown("---")
             server_names = st.session_state.df_users['name'].tolist()
-            selected_server = st.selectbox("🔍 Selecione um servidor da lista abaixo para inspecionar os conteúdos encontrados:", ["Nenhum selecionado"] + server_names)
+            selected_server = st.selectbox("🔍 Selecione um servidor para ver os itens detalhadamente:", ["Nenhum selecionado"] + server_names)
             
             if selected_server != "Nenhum selecionado":
                 row = st.session_state.df_users[st.session_state.df_users['name'] == selected_server].iloc[0]
                 details = row.get('_search_details', {"Canais": [], "Filmes": [], "Séries": []})
                 
-                categories_order = ["Filmes", "Séries", "Canais"]  # Canais rigidamente por último
-                has_content = any(details.get(cat) for cat in categories_order)
+                # Monta estritamente a lista linha por linha desejada pelo usuário
+                lines = []
+                for f in details.get("Filmes", []):
+                    lines.append(f)
+                for s in details.get("Séries", []):
+                    lines.append(f"Séries: {s}")
                 
-                if has_content:
-                    with st.expander(f"📦 Lista Suspensa de Itens - {row.get('username', 'N/A')}", expanded=True):
-                        for cat in categories_order:
-                            matches = details.get(cat, [])
-                            if matches:
-                                st.markdown(f"**{cat}:**")
-                                # Gera uma única string unida por quebras de linha estritas (\n) para forçar um por linha
-                                texto_formatado = "\n".join([f"- {item}" for item in matches])
-                                st.markdown(texto_formatado)
-                                st.markdown("")  # Espaçamento entre categorias
+                # Canais por último obrigatoriamente
+                if details.get("Canais"):
+                    lines.append(f"Canais ({len(details['Canais'])})")
+                elif int(row.get('Canais', 0)) > 0:
+                    lines.append(f"Canais ({row['Canais']})")
+                
+                if lines:
+                    with st.expander(f"📦 Itens do Servidor - {row.get('username', 'N/A')}", expanded=True):
+                        # Gera o HTML forçando quebras estritas e responsividade mobile sem esticar a tela
+                        html_formatado = "<br>".join(lines)
+                        st.markdown(f"""
+                        <div style="white-space: pre-wrap; word-break: break-word; font-size: 14px; line-height: 1.6; max-width: 100%;">
+                        {html_formatado}
+                        </div>
+                        """, unsafe_allow_html=True)
                 else:
-                    st.info(f"Nenhum item correspondente encontrado para este servidor com o termo '{search_query}'.")
+                    st.info("Nenhum item correspondente encontrado para este servidor.")
 
             st.markdown("---")
             edited_users = st.session_state.df_users.to_dict(orient="records")

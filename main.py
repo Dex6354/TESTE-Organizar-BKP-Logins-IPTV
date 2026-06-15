@@ -326,14 +326,11 @@ if uploaded_file is not None:
 
         if "df_users" in st.session_state:
             st.subheader("Lista Organizada")
-            st.caption("💡 Clique em cima de qualquer linha para abrir os detalhes suspensos com itens linha por linha abaixo.")
 
             edited_df = st.data_editor(
                 st.session_state.df_users, 
                 num_rows="dynamic", 
                 use_container_width=True,
-                selection_mode="single_row",  # Habilita a seleção ao clicar na linha/coluna
-                key="table_editor",
                 column_config={
                     "userid": None, "type": None, "_search_details": None,
                     "name": st.column_config.TextColumn("Nome"),
@@ -353,33 +350,30 @@ if uploaded_file is not None:
                 st.session_state.df_users = pd.DataFrame(sort_users(updated_list))
                 st.rerun()
 
-            # Captura a linha clicada pelo usuário
-            selected_rows = st.session_state.table_editor.get("selection", {}).get("rows", [])
+            # Seletor alternativo para garantir compatibilidade entre versões do Streamlit
+            st.markdown("---")
+            server_names = st.session_state.df_users['name'].tolist()
+            selected_server = st.selectbox("🔍 Selecione um servidor da lista abaixo para inspecionar os conteúdos encontrados:", ["Nenhum selecionado"] + server_names)
             
-            if selected_rows:
-                selected_idx = selected_rows[0]
-                if selected_idx < len(st.session_state.df_users):
-                    row = st.session_state.df_users.iloc[selected_idx]
-                    details = row.get('_search_details', {"Canais": [], "Filmes": [], "Séries": []})
-                    
-                    st.markdown(f"### 🍿 Detalhes do Servidor Selecionado: {row['name']}")
-                    
-                    # Ordem customizada: Canais por último
-                    categories_order = ["Filmes", "Séries", "Canais"]
-                    
-                    has_content = any(details.get(cat) for cat in categories_order)
-                    
-                    if has_content:
-                        with st.expander(f"📦 Lista Suspensa de Itens - {row.get('username', 'N/A')}", expanded=True):
-                            for cat in categories_order:
-                                matches = details.get(cat, [])
-                                if matches:
-                                    st.markdown(f"**{cat}:**")
-                                    for item in matches:
-                                        st.write(f"- {item}")  # Exibe estritamente um item por linha
-                    else:
-                        st.info(f"Nenhum item correspondente encontrado para este servidor com o termo '{search_query}'.")
+            if selected_server != "Nenhum selecionado":
+                row = st.session_state.df_users[st.session_state.df_users['name'] == selected_server].iloc[0]
+                details = row.get('_search_details', {"Canais": [], "Filmes": [], "Séries": []})
+                
+                categories_order = ["Filmes", "Séries", "Canais"] # Canais por último
+                has_content = any(details.get(cat) for cat in categories_order)
+                
+                if has_content:
+                    with st.expander(f"📦 Lista Suspensa de Itens - {row.get('username', 'N/A')}", expanded=True):
+                        for cat in categories_order:
+                            matches = details.get(cat, [])
+                            if matches:
+                                st.markdown(f"**{cat}:**")
+                                for item in matches:
+                                    st.write(f"- {item}") # Exibe estritamente um item por linha
+                else:
+                    st.info(f"Nenhum item correspondente encontrado para este servidor com o termo '{search_query}'.")
 
+            st.markdown("---")
             edited_users = st.session_state.df_users.to_dict(orient="records")
             for user in edited_users:
                 user.pop('json_link', None)

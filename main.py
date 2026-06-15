@@ -229,14 +229,14 @@ def test_single_user(user, search_query=""):
     if search_query:
         match_segments = []
         
-        # 1. Processar Filmes (Cada um em sua linha)
+        # 1. Processar Filmes
         if search_matches["Filmes"]:
             for i, filme in enumerate(search_matches["Filmes"][:2]):
                 match_segments.append(filme)
             if len(search_matches["Filmes"]) > 2:
                 match_segments[-1] += f" (+{len(search_matches['Filmes']) - 2})"
                 
-        # 2. Processar Séries (Primeira com prefixo, demais abaixo)
+        # 2. Processar Séries
         if search_matches["Séries"]:
             for i, serie in enumerate(search_matches["Séries"][:2]):
                 if i == 0:
@@ -292,6 +292,23 @@ def sort_users(users_list):
 
 
 st.set_page_config(page_title="Organizador de Logins", layout="wide")
+
+# CSS customizado para corrigir estouro de largura em telas mobile
+st.markdown(
+    """
+    <style>
+    @media (max-width: 768px) {
+        /* Evita que menus suspensos, popovers e tabelas fiquem maiores que a tela */
+        div[data-baseweb="popover"], div[data-baseweb="menu"], .stDataEditor {
+            max-width: 90vw !important;
+            overflow-x: auto !important;
+        }
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
 st.subheader("Organizador de Logins .dev")
 
 uploaded_file = st.file_uploader("Escolha um arquivo .dev", type="dev")

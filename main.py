@@ -170,55 +170,55 @@ def test_single_user(user, search_query=""):
                     except:
                         pass
 
-        if status == "active":
-            actions_url = f"{base}/player_api.php?username={quote(username)}&password={quote(password)}"
-            s_norm = normalize_text(search_query) if search_query else ""
+    if status == "active":
+        actions_url = f"{base}/player_api.php?username={quote(username)}&password={quote(password)}"
+        s_norm = normalize_text(search_query) if search_query else ""
 
-            actions = {
-                "Canais": "get_live_streams",
-                "Filmes": "get_vod_streams",
-                "Séries": "get_series"
-            }
+        actions = {
+            "Canais": "get_live_streams",
+            "Filmes": "get_vod_streams",
+            "Séries": "get_series"
+        }
 
-            def fetch_content_action(category, action_name):
-                url = f"{actions_url}&action={action_name}"
-                try:
-                    with requests.Session() as session:
-                        session.mount("https://", LegacySslAdapter())
-                        r = session.get(url, headers={"User-Agent": USER_AGENTS[0], "Accept": "*/*"}, verify=False, timeout=8)
-                        if r.status_code == 200:
-                            return category, r.json()
-                except:
-                    pass
-                return category, None
+        def fetch_content_action(category, action_name):
+            url = f"{actions_url}&action={action_name}"
+            try:
+                with requests.Session() as session:
+                    session.mount("https://", LegacySslAdapter())
+                    r = session.get(url, headers={"User-Agent": USER_AGENTS[0], "Accept": "*/*"}, verify=False, timeout=8)
+                    if r.status_code == 200:
+                        return category, r.json()
+            except:
+                pass
+            return category, None
 
-            with ThreadPoolExecutor(max_workers=3) as inner_executor:
-                future_to_cat = {inner_executor.submit(fetch_content_action, cat, act): cat for cat, act in actions.items()}
-                for future in as_completed(future_to_cat):
-                    cat, res_list = future.result()
-                    if isinstance(res_list, list):
-                        if cat == "Canais":
-                            live_count = len(res_list)
-                            if s_norm:
-                                search_matches["Canais"] = [i.get("name", "") for i in res_list if i.get("name") and s_norm in normalize_text(i.get("name"))]
-                        elif cat == "Filmes":
-                            vod_count = len(res_list)
-                            if s_norm:
-                                search_matches["Filmes"] = [i.get("name", "") for i in res_list if i.get("name") and s_norm in normalize_text(i.get("name"))]
-                        elif cat == "Séries":
-                            series_count = len(res_list)
-                            if s_norm:
-                                matched_items = [i for i in res_list if i.get("name") and s_norm in normalize_text(i.get("name"))]
-                                if matched_items:
-                                    def fetch_detail(item):
-                                        s_id = item.get("series_id")
-                                        s_name = item.get("name", "")
-                                        info = get_series_details(base, username, password, s_id)
-                                        return f"{s_name} ({info})" if info else s_name
+        with ThreadPoolExecutor(max_workers=3) as inner_executor:
+            future_to_cat = {inner_executor.submit(fetch_content_action, cat, act): cat for cat, act in actions.items()}
+            for future in as_completed(future_to_cat):
+                cat, res_list = future.result()
+                if isinstance(res_list, list):
+                    if cat == "Canais":
+                        live_count = len(res_list)
+                        if s_norm:
+                            search_matches["Canais"] = [i.get("name", "") for i in res_list if i.get("name") and s_norm in normalize_text(i.get("name"))]
+                    elif cat == "Filmes":
+                        vod_count = len(res_list)
+                        if s_norm:
+                            search_matches["Filmes"] = [i.get("name", "") for i in res_list if i.get("name") and s_norm in normalize_text(i.get("name"))]
+                    elif cat == "Séries":
+                        series_count = len(res_list)
+                        if s_norm:
+                            matched_items = [i for i in res_list if i.get("name") and s_norm in normalize_text(i.get("name"))]
+                            if matched_items:
+                                def fetch_detail(item):
+                                    s_id = item.get("series_id")
+                                    s_name = item.get("name", "")
+                                    info = get_series_details(base, username, password, s_id)
+                                    return f"{s_name} ({info})" if info else s_name
 
-                                    with ThreadPoolExecutor(max_workers=5) as series_executor:
-                                        results = list(series_executor.map(fetch_detail, matched_items[:10]))
-                                    search_matches["Séries"] = results
+                                with ThreadPoolExecutor(max_workers=5) as series_executor:
+                                    results = list(series_executor.map(fetch_detail, matched_items[:10]))
+                                search_matches["Séries"] = results
 
     user['name'] = f"✅{name}" if status == "active" else f"❌{name}"
     user['retorno'] = retorno_code
@@ -228,18 +228,29 @@ def test_single_user(user, search_query=""):
     
     if search_query:
         match_segments = []
-        if search_matches["Filmes"]: 
-            filmes_inline = ", ".join(search_matches["Filmes"][:2])
-            if len(search_matches["Filmes"]) > 2: filmes_inline += f" (+{len(search_matches['Filmes']) - 2})"
-            match_segments.append(f"Filmes: {filmes_inline}")
-        if search_matches["Séries"]: 
-            series_inline = ", ".join(search_matches["Séries"][:2])
-            if len(search_matches["Séries"]) > 2: series_inline += f" (+{len(search_matches['Séries']) - 2})"
-            match_segments.append(f"Séries: {series_inline}")
+        
+        # 1. Processar Filmes (Cada um em sua linha)
+        if search_matches["Filmes"]:
+            for i, filme in enumerate(search_matches["Filmes"][:2]):
+                match_segments.append(filme)
+            if len(search_matches["Filmes"]) > 2:
+                match_segments[-1] += f" (+{len(search_matches['Filmes']) - 2})"
+                
+        # 2. Processar Séries (Primeira com prefixo, demais abaixo)
+        if search_matches["Séries"]:
+            for i, serie in enumerate(search_matches["Séries"][:2]):
+                if i == 0:
+                    match_segments.append(f"Séries: {serie}")
+                else:
+                    match_segments.append(serie)
+            if len(search_matches["Séries"]) > 2:
+                match_segments[-1] += f" (+{len(search_matches['Séries']) - 2})"
+                
+        # 3. Processar Canais
         if search_matches["Canais"]: 
             match_segments.append(f"Canais ({len(search_matches['Canais'])})")
             
-        user['Resultados Busca'] = " | ".join(match_segments) if match_segments else "Nenhum"
+        user['Resultados Busca'] = "\n".join(match_segments) if match_segments else "Nenhum"
         user['_search_details'] = search_matches
     else:
         user['Resultados Busca'] = "-"
@@ -281,31 +292,6 @@ def sort_users(users_list):
 
 
 st.set_page_config(page_title="Organizador de Logins", layout="wide")
-
-# CSS para conter estritamente a largura e quebrar textos na lista suspensa (selectbox) aberta no mobile
-st.markdown("""
-    <style>
-        /* Limita e força quebra de texto na lista aberta do selectbox (BaseWeb Popover) */
-        div[data-baseweb="popover"], ul[role="listbox"] {
-            max-width: 92vw !important;
-            box-sizing: border-box !important;
-        }
-        ul[role="listbox"] li {
-            white-space: normal !important;
-            word-break: break-all !important;
-        }
-        /* Ajustes de responsividade global e tabelas */
-        .stDataFrame, div[data-testid="stTable"], .stMarkdown {
-            word-break: break-word !important;
-            white-space: pre-wrap !important;
-        }
-        div[data-testid="stExpander"] {
-            max-width: 100% !important;
-            overflow-x: hidden !important;
-        }
-    </style>
-""", unsafe_allow_html=True)
-
 st.subheader("Organizador de Logins .dev")
 
 uploaded_file = st.file_uploader("Escolha um arquivo .dev", type="dev")
@@ -375,37 +361,6 @@ if uploaded_file is not None:
                 st.session_state.df_users = pd.DataFrame(sort_users(updated_list))
                 st.rerun()
 
-            st.markdown("---")
-            server_names = st.session_state.df_users['name'].tolist()
-            selected_server = st.selectbox("🔍 Selecione um servidor para ver os itens detalhadamente:", ["Nenhum selecionado"] + server_names)
-            
-            if selected_server != "Nenhum selecionado":
-                row = st.session_state.df_users[st.session_state.df_users['name'] == selected_server].iloc[0]
-                details = row.get('_search_details', {"Canais": [], "Filmes": [], "Séries": []})
-                
-                lines = []
-                for f in details.get("Filmes", []):
-                    lines.append(f)
-                for s in details.get("Séries", []):
-                    lines.append(f"Séries: {s}")
-                
-                if details.get("Canais"):
-                    lines.append(f"Canais ({len(details['Canais'])})")
-                elif int(row.get('Canais', 0)) > 0:
-                    lines.append(f"Canais ({row['Canais']})")
-                
-                if lines:
-                    with st.expander(f"📦 Itens do Servidor - {row.get('username', 'N/A')}", expanded=True):
-                        html_formatado = "<br>".join(lines)
-                        st.markdown(f"""
-                        <div style="white-space: pre-wrap; word-break: break-word; font-size: 14px; line-height: 1.6; max-width: 100%;">
-                        {html_formatado}
-                        </div>
-                        """, unsafe_allow_html=True)
-                else:
-                    st.info("Nenhum item correspondente encontrado para este servidor.")
-
-            st.markdown("---")
             edited_users = st.session_state.df_users.to_dict(orient="records")
             for user in edited_users:
                 user.pop('json_link', None)
@@ -429,6 +384,25 @@ if uploaded_file is not None:
                 file_name=download_file_name,
                 mime="application/octet-stream"
             )
+
+            if search_query and '_search_details' in st.session_state.df_users.columns:
+                st.markdown("### 🍿 Detalhes dos Itens Encontrados")
+                encontrou_algo = False
+                
+                for _, row in st.session_state.df_users.iterrows():
+                    details = row.get('_search_details')
+                    if details and any(details.values()):
+                        encontrou_algo = True
+                        with st.expander(f"📦 {row['name']} | Usuário: {row.get('username', 'N/A')}"):
+                            for cat, matches in details.items():
+                                if matches:
+                                    st.markdown(f"**{cat}:**")
+                                    for item in matches[:15]:
+                                        st.write(f"- {item}")
+                                    if len(matches) > 15:
+                                        st.write(f"... e mais {len(matches)-15} correspondências.")
+                if not encontrou_algo:
+                    st.info(f"Nenhum título correspondente a '{search_query}' foi localizado nos servidores ativos.")
 
     except json.JSONDecodeError:
         st.error("Erro ao decodificar o arquivo JSON. Certifique-se de que é um arquivo JSON válido.")

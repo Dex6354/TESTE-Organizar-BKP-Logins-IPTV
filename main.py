@@ -14,6 +14,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # Desabilitar avisos de segurança SSL
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+# Configurações Globais de Rede
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "VLC/3.0.18 LibVLC/3.0.18",
+    "IPTVSmartersPlayer"
+]
+
 class LegacySslAdapter(requests.adapters.HTTPAdapter):
     """Adaptador SSL para compatibilidade máxima com cifras antigas e servidores legados."""
     def init_poolmanager(self, *args, **kwargs):
@@ -38,7 +45,7 @@ def normalize_text(text):
     return unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('utf-8')
 
 def test_single_user(user, search_query=""):
-    """Testa status do usuário e coleta estatísticas de conteúdo (Canais, Filmes, Séries)."""
+    """Testa status do usuário e coleta estatísticas de conteúdo em paralelo."""
     name = user.get('name', '')
     url = user.get('url', '')
 
@@ -81,13 +88,7 @@ def test_single_user(user, search_query=""):
         if api_url.startswith("https://"):
             urls_to_test.append(api_url.replace("https://", "http://", 1))
         elif api_url.startswith("http://"):
-            urls_to_test.append(api_url.replace("http://", "https://", 1))
-
-        user_agents = [
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "VLC/3.0.18 LibVLC/3.0.18",
-            "IPTVSmartersPlayer"
-        ]
+            urls_to_test.append(api_url.replace("https://", "http://", 1))
 
         found_active = False
 
@@ -95,7 +96,7 @@ def test_single_user(user, search_query=""):
             if found_active:
                 break
 
-            for ua in user_agents:
+            for ua in USER_AGENTS:
                 headers = {
                     "User-Agent": ua,
                     "Accept": "*/*",
@@ -106,7 +107,7 @@ def test_single_user(user, search_query=""):
                 try:
                     with requests.Session() as session:
                         session.mount("https://", LegacySslAdapter())
-                        resp = session.get(target_url, headers=headers, verify=False, timeout=10)
+                        resp = session.get(target_url, headers=headers, verify=False, timeout=4)
                         retorno_code = str(resp.status_code)
                         resp.encoding = resp.apparent_encoding
                         content = resp.text
@@ -118,10 +119,16 @@ def test_single_user(user, search_query=""):
                                 status = "active"
                             found_active = True
                             break
+                except requests.exceptions.Timeout:
+                    retorno_code = "Timeout"
+                    break  # Se deu timeout, o servidor está inacessível. Não gaste tempo testando outros User-Agents.
+                except requests.exceptions.ConnectionError:
+                    retorno_code = "Erro Conexão"
+                    break  # Fora do ar. Corta o laço de User-Agents imediatamente.
                 except:
                     pass
 
-                # MÉTODO 2: Fallback para urllib nativo
+                # MÉTODO 2: Fallback para urllib nativo (apenas se requests falhar por outro motivo)
                 if not found_active:
                     try:
                         ssl_ctx = ssl._create_unverified_context()
@@ -130,7 +137,7 @@ def test_single_user(user, search_query=""):
                         except:
                             pass
                         req = urllib.request.Request(target_url, headers=headers)
-                        with urllib.request.urlopen(req, context=ssl_ctx, timeout=10) as response:
+                        with urllib.request.urlopen(req, context=ssl_ctx, timeout=4) as response:
                             retorno_code = str(response.getcode())
                             content = response.read().decode('utf-8', errors='ignore')
                             if "user_info" in content:
@@ -145,48 +152,49 @@ def test_single_user(user, search_query=""):
                     except:
                         pass
 
-        # Se ativo, realiza a contagem e busca de conteúdo baseado nas actions da Xtream API
+        # Se ativo, realiza a busca e contagem de conteúdo EM PARALELO (Otimização interna)
         if status == "active":
             actions_url = f"{base}/player_api.php?username={quote(username)}&password={quote(password)}"
-            extra_headers = {"User-Agent": user_agents[0], "Accept": "*/*"}
             s_norm = normalize_text(search_query) if search_query else ""
 
-            try:
-                with requests.Session() as session:
-                    session.mount("https://", LegacySslAdapter())
-                    
-                    # Canais ao Vivo
-                    try:
-                        r = session.get(f"{actions_url}&action=get_live_streams", headers=extra_headers, verify=False, timeout=8)
-                        if r.status_code == 200 and isinstance(r.json(), list):
-                            res_list = r.json()
+            actions = {
+                "Canais": "get_live_streams",
+                "Filmes": "get_vod_streams",
+                "Séries": "get_series"
+            }
+
+            def fetch_content_action(category, action_name):
+                url = f"{actions_url}&action={action_name}"
+                try:
+                    with requests.Session() as session:
+                        session.mount("https://", LegacySslAdapter())
+                        r = session.get(url, headers={"User-Agent": USER_AGENTS[0], "Accept": "*/*"}, verify=False, timeout=8)
+                        if r.status_code == 200:
+                            return category, r.json()
+                except:
+                    pass
+                return category, None
+
+            # Dispara as 3 requisições HTTP do mesmo servidor de forma paralela
+            with ThreadPoolExecutor(max_workers=3) as inner_executor:
+                future_to_cat = {inner_executor.submit(fetch_content_action, cat, act): cat for cat, act in actions.items()}
+                for future in as_completed(future_to_cat):
+                    cat, res_list = future.result()
+                    if isinstance(res_list, list):
+                        if cat == "Canais":
                             live_count = len(res_list)
                             if s_norm:
                                 search_matches["Canais"] = [i.get("name", "") for i in res_list if i.get("name") and s_norm in normalize_text(i.get("name"))]
-                    except: pass
-
-                    # Filmes (VOD)
-                    try:
-                        r = session.get(f"{actions_url}&action=get_vod_streams", headers=extra_headers, verify=False, timeout=8)
-                        if r.status_code == 200 and isinstance(r.json(), list):
-                            res_list = r.json()
+                        elif cat == "Filmes":
                             vod_count = len(res_list)
                             if s_norm:
                                 search_matches["Filmes"] = [i.get("name", "") for i in res_list if i.get("name") and s_norm in normalize_text(i.get("name"))]
-                    except: pass
-
-                    # Séries
-                    try:
-                        r = session.get(f"{actions_url}&action=get_series", headers=extra_headers, verify=False, timeout=8)
-                        if r.status_code == 200 and isinstance(r.json(), list):
-                            res_list = r.json()
+                        elif cat == "Séries":
                             series_count = len(res_list)
                             if s_norm:
                                 search_matches["Séries"] = [i.get("name", "") for i in res_list if i.get("name") and s_norm in normalize_text(i.get("name"))]
-                    except: pass
-            except: pass
 
-    # Injeta os novos parâmetros estruturados no dicionário do usuário
+    # Injeta os parâmetros estruturados no dicionário do usuário
     user['name'] = f"✅{name}" if status == "active" else f"❌{name}"
     user['retorno'] = retorno_code
     user['Canais'] = live_count
@@ -251,15 +259,16 @@ if uploaded_file is not None:
         file_id = f"data_{uploaded_file.name}_{uploaded_file.size}_{search_query}"
         btn_update = st.button("🚀 Testar / Atualizar Todos os Logins")
         
-        # Só reprocessa a API se for um arquivo novo, nova busca ou gatilho manual do botão
+        # Só reprocessa se for um arquivo novo, nova busca ou gatilho manual do botão
         if btn_update or "file_id" not in st.session_state or st.session_state.file_id != file_id:
             file_content = uploaded_file.getvalue().decode("utf-8")
             data = json.loads(file_content)
 
             if "multi_users" in data:
-                with st.spinner("⚡ Analisando credenciais e consultando acervo de mídias..."):
+                with st.spinner("⚡ Analisando credenciais e consultando acervo de mídias simultaneamente..."):
                     tested_users = []
-                    with ThreadPoolExecutor(max_workers=10) as executor:
+                    # Aumentado o max_workers global para agilizar testes concorrentes entre servidores diferentes
+                    with ThreadPoolExecutor(max_workers=15) as executor:
                         futures = [executor.submit(test_single_user, user, search_query) for user in data["multi_users"]]
                         for future in as_completed(futures):
                             tested_users.append(future.result())
@@ -339,7 +348,7 @@ if uploaded_file is not None:
                 mime="application/octet-stream"
             )
 
-            # Exibição detalhada dos títulos específicos encontrados pela busca (estilo do script de testes)
+            # Exibição detalhada dos títulos específicos encontrados pela busca
             if search_query and '_search_details' in st.session_state.df_users.columns:
                 st.markdown("### 🍿 Detalhes dos Itens Encontrados")
                 encontrou_algo = False

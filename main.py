@@ -300,7 +300,7 @@ st.markdown(
     @media (max-width: 768px) {
         /* Evita que menus suspensos, popovers e tabelas fiquem maiores que a tela */
         div[data-baseweb="popover"], div[data-baseweb="menu"], .stDataEditor {
-            max-width: 90vw !important;
+            max-width: 10vw !important;
             overflow-x: auto !important;
         }
     }

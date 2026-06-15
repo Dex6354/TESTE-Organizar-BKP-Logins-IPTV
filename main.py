@@ -293,28 +293,38 @@ def sort_users(users_list):
 
 st.set_page_config(page_title="Organizador de Logins", layout="wide")
 
-# CSS focado em neutralizar o cálculo de largura/posição inline do Glide Data Grid no Mobile
+# CSS Avançado e Agressivo para conter portais flutuantes do Glide Data Grid no Mobile
 st.markdown(
     """
     <style>
     @media (max-width: 768px) {
-        /* Neutraliza o deslocamento para a direita e limita a largura do portal de expansão */
-        [class*="glideDataGrid-portal"], .glideDataGrid-portal {
-            left: 5vw !important;
-            width: 90vw !important;
-            max-width: 90vw !important;
+        /* Redefine de forma absoluta a posição e largura de qualquer portal flutuante */
+        [class*="glideDataGrid-portal"], .glideDataGrid-portal,
+        [class*="glideDataGrid-portal"] > div, .glideDataGrid-portal > div {
+            left: 4vw !important;
+            right: 4vw !important;
+            width: 92vw !important;
+            max-width: 92vw !important;
+            box-sizing: border-box !important;
         }
         
-        /* Força os blocos internos, diálogos e caixas de texto clonadas a respeitarem a tela */
-        [class*="glideDataGrid-portal"] div,
+        /* Força quebra de linha obrigatória e impede estiramento horizontal do texto */
         [class*="glideDataGrid-portal"] textarea,
-        .glideDataGrid-portal div,
         .glideDataGrid-portal textarea,
+        [class*="glideDataGrid-portal"] *,
+        .glideDataGrid-portal * {
+            width: 100% !important;
+            max-width: 100% !important;
+            box-sizing: border-box !important;
+            white-space: pre-wrap !important;
+            word-break: break-word !important;
+            overflow-wrap: break-word !important;
+        }
+        
+        /* Ajuste complementar para popovers e menus normais */
         div[data-baseweb="popover"],
         div[data-baseweb="menu"] {
-            width: 100% !important;
-            max-width: 88vw !important;
-            box-sizing: border-box !important;
+            max-width: 90vw !important;
         }
     }
     </style>
